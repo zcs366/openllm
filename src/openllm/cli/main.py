@@ -70,6 +70,10 @@ class OpenLLMShell(cmd.Cmd):
             print(f"\n状态: {s['state']} | 轮次: {s['turns']} | 上下文: {s['context_pct']}%")
             print(f"模型: {s['model']} | 连接: {'✅' if s['connected'] else '❌'}")
             print(f"胶囊: {s['capsules']}个 | 工具: {s['tools']}个 | 安全: L{s['security_level']}")
+            print(f"认知: {s['cognitive']} | 工具成功率: {s['tool_success_rate']}")
+
+        elif cmd == "cognitive":
+            print(self.engine.cognitive_report())
 
         elif cmd == "memory":
             ctx = self.engine.memory.read()

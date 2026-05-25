@@ -24,6 +24,7 @@ from ..identity.soul import (
 )
 from ..security.gate import SecurityFoundation
 from ..tools.executor import ToolRegistry, ToolResult, create_default_tools
+from .meta import CognitiveDashboard, SelfRescue
 
 import numpy as np
 
@@ -68,6 +69,12 @@ class OpenLLMEngine:
         # Provider
         self.provider: Optional[DeepSeekProvider] = None
         self._history: list[Message] = []
+
+        # 元认知
+        self.dashboard = CognitiveDashboard(max_context=config.max_context_tokens)
+        self.rescue = SelfRescue(self.dashboard)
+        self.dashboard.on_overload = self.rescue.on_overload
+        self.dashboard.on_fatigue = self.rescue.on_fatigue
 
         # 尝试连接
         self._init_provider()
@@ -240,9 +247,10 @@ class OpenLLMEngine:
     def status(self) -> dict:
         """Agent状态总览。"""
         v = self.loop.check_vitals()
+        snap = self.dashboard.evaluate(self.loop.context_used, self.loop.turn_count)
         return {
             "name": self.config.name,
-            "version": "0.1.0",
+            "version": "0.2.0",
             "state": v["state"],
             "turns": v["turn_count"],
             "context_pct": v["context_used_pct"],
@@ -251,4 +259,12 @@ class OpenLLMEngine:
             "capsules": len(list(self.memory.capsule_dir.glob("v06_*.json"))),
             "tools": len(self.tools.list_tools()),
             "security_level": int(self.security.gate.current_level),
+            "cognitive": snap.cognitive_state.value,
+            "tool_success_rate": f"{snap.tool_success_rate*100:.0f}%",
+            "should_compress": snap.should_compress,
         }
+
+    def cognitive_report(self) -> str:
+        """生成认知自我报告。"""
+        self.dashboard.evaluate(self.loop.context_used, self.loop.turn_count)
+        return self.dashboard.self_awareness_report()
