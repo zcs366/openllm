@@ -26,8 +26,6 @@ from ..security.gate import SecurityFoundation
 from ..tools.executor import ToolRegistry, ToolResult, create_default_tools
 from .meta import CognitiveDashboard, SelfRescue
 
-import numpy as np
-
 
 @dataclass
 class AgentConfig:
@@ -235,11 +233,9 @@ class OpenLLMEngine:
             insights=insights,
         )
 
-        # Δ向量（Phase 1: 简化版。未来从模型隐状态提取）
-        delta_vec = DeltaCapsule(
-            session_id=text.session_id,
-            vector=np.random.randn(256).astype(np.float32) * 0.01,
-        )
+        # Δ向量（从真实对话文本提取）
+        session_text = f"{text.to_text()} | 对话{self.loop.turn_count}轮"
+        delta_vec = DeltaCapsule.from_text(text.session_id, session_text)
 
         path = self.memory.write(text, delta_vec)
         return f"💾 记忆已保存 → {path}"

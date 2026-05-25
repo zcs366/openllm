@@ -23,7 +23,7 @@ import numpy as np
 
 # ── 配置 ────────────────────────────────────────────
 
-CAPSULE_DIM = 256          # v0.7语义向量维度
+CAPSULE_DIM = 384          # v0.7语义向量维度（all-MiniLM-L6-v2）
 CHECKPOINT_INTERVAL = 5    # 每N次会话触发快照
 DELTA_NORM_THRESHOLD = 0.3 # Δ范数触发快照阈值
 CAPSULE_DIR = Path(__file__).parent.parent.parent.parent / "caps"
@@ -50,6 +50,15 @@ class TextCapsule:
             "insights": self.insights,
             "unresolved": self.unresolved,
         }
+
+    def to_text(self) -> str:
+        """将胶囊转为可被embedding编码的文本。"""
+        parts = []
+        for d in self.decisions:
+            parts.append(d.get("summary", str(d)))
+        for i in self.insights:
+            parts.append(i)
+        return " | ".join(parts) if parts else self.session_id
 
     @classmethod
     def from_dict(cls, d: dict) -> "TextCapsule":
@@ -91,6 +100,13 @@ class DeltaCapsule:
         self.vector = (self.vector + np.asarray(other, dtype=np.float32))
         self.norm = float(np.linalg.norm(self.vector))
         return self
+
+    @classmethod
+    def from_text(cls, session_id: str, text: str) -> "DeltaCapsule":
+        """从文本生成Δ向量——真实的语义编码。"""
+        from openllm_memory import encode_text
+        vec = encode_text(text)
+        return cls(session_id=session_id, vector=vec, metadata={"source": "embedding", "model": "all-MiniLM-L6-v2"})
 
     def to_dict(self) -> dict:
         return {
