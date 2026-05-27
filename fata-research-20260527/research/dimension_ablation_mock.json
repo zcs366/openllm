@@ -1,0 +1,80 @@
+{
+  "timestamp": "2026-05-27 18:25:08",
+  "experiment": "ITA 维度消融实验 (T-ITA-01)",
+  "dimensions": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32,
+    64,
+    128,
+    256
+  ],
+  "results": {
+    "1": {
+      "dimension": 1,
+      "rtce": 1.0,
+      "unique_indices": 1,
+      "entropy": 0.0,
+      "samples": 100
+    },
+    "2": {
+      "dimension": 2,
+      "rtce": 0.5193939393939394,
+      "unique_indices": 2,
+      "entropy": 1.0,
+      "samples": 100
+    },
+    "4": {
+      "dimension": 4,
+      "rtce": 0.2547474747474747,
+      "unique_indices": 4,
+      "entropy": 2.0,
+      "samples": 100
+    },
+    "8": {
+      "dimension": 8,
+      "rtce": 0.12363636363636364,
+      "unique_indices": 8,
+      "entropy": 3.0,
+      "samples": 100
+    },
+    "16": {
+      "dimension": 16,
+      "rtce": 0.0602020202020202,
+      "unique_indices": 16,
+      "entropy": 4.0,
+      "samples": 100
+    },
+    "32": {
+      "dimension": 32,
+      "rtce": 0.03191919191919192,
+      "unique_indices": 30,
+      "entropy": 4.906890595608519,
+      "samples": 100
+    },
+    "64": {
+      "dimension": 64,
+      "rtce": 0.01717171717171717,
+      "unique_indices": 50,
+      "entropy": 5.643856189774724,
+      "samples": 100
+    },
+    "128": {
+      "dimension": 128,
+      "rtce": 0.008686868686868687,
+      "unique_indices": 66,
+      "entropy": 6.044394119358453,
+      "samples": 100
+    },
+    "256": {
+      "dimension": 256,
+      "rtce": 0.0032323232323232323,
+      "unique_indices": 84,
+      "entropy": 6.392317422778761,
+      "samples": 100
+    }
+  }
+}
