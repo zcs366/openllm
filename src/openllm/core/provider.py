@@ -34,6 +34,7 @@ class ProviderType(Enum):
     DEEPSEEK = "deepseek"
     OPENAI = "openai"
     LOCAL = "local"
+    OLLAMA = "ollama"
 
 
 @dataclass
@@ -223,6 +224,14 @@ class DeepSeekProvider:
 def create_provider(provider_type: str = DEFAULT_PROVIDER, **kwargs) -> Any:
     """创建Provider实例。"""
     config = ModelConfig(provider=provider_type, **kwargs)
+
+    if provider_type == "ollama":
+        config.endpoint = kwargs.get("endpoint", "http://localhost:11434/v1/chat/completions")
+        config.api_key = kwargs.get("api_key", "ollama")  # Ollama不需要key，但OpenAI客户端需要非空
+        config.model = kwargs.get("model", "qwen3.5:9b")
+        logger.info(f"Ollama provider: {config.model} @ {config.endpoint}")
+        return DeepSeekProvider(config)
+
     if provider_type == "deepseek":
         return DeepSeekProvider(config)
     elif provider_type == "openai":
