@@ -156,6 +156,35 @@ def _get_iko_consume_trace():
         _IKO_CONSUME_INITIALIZED = True
         return _IKO_CONSUME_TRACE
 
+# ── ISA opinion_manager 集成（血管#5: IKO→ISA） ──────
+_ISA_OPINION_INITIALIZED = False
+_ISA_OPINION_LOCK = threading.Lock()
+_ISA_SCHEMA_MATCHES = None
+
+def _get_isa_schema_matches():
+    """线程安全地获取 ISA schema_matches 回调。懒加载。"""
+    global _ISA_OPINION_INITIALIZED, _ISA_SCHEMA_MATCHES
+    if _ISA_OPINION_INITIALIZED:
+        return _ISA_SCHEMA_MATCHES
+    with _ISA_OPINION_LOCK:
+        if _ISA_OPINION_INITIALIZED:
+            return _ISA_SCHEMA_MATCHES
+        isa_path = Path.home() / "projects" / "isa"
+        if not isa_path.exists():
+            _ISA_OPINION_INITIALIZED = True
+            return None
+        try:
+            if str(isa_path) not in sys.path:
+                sys.path.insert(0, str(isa_path))
+            from opinion_manager import schema_matches
+            _ISA_SCHEMA_MATCHES = schema_matches
+            logger.info("✅ ISA opinion_manager.schema_matches 已加载")
+        except Exception as e:
+            logger.warning(f"ISA opinion_manager 不可用: {e}")
+            _ISA_SCHEMA_MATCHES = None
+        _ISA_OPINION_INITIALIZED = True
+        return _ISA_SCHEMA_MATCHES
+
 
 @dataclass
 class AgentConfig:
@@ -532,6 +561,19 @@ class OpenLLMEngine:
                 })
             except Exception as e:
                 logger.debug(f"IKO trace消费跳过: {e}")
+
+        # ── 血管 #5: IKO→ISA 反馈闭环（schema验证→质量信号） ──
+        isa_schema = _get_isa_schema_matches()
+        if isa_schema and result.success:
+            try:
+                schema_result = isa_schema(
+                    task_type="tool_call",
+                    result={"output": result.output[:1000], "error": result.error},
+                )
+                if not schema_result["passed"]:
+                    logger.info(f"ISA schema验证: {tool_name} 未通过 {schema_result['failures']}")
+            except Exception as e:
+                logger.debug(f"ISA schema验证跳过: {e}")
 
         return result
 
