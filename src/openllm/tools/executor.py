@@ -162,6 +162,40 @@ def tool_search_files(pattern: str, path: str = ".", file_glob: Optional[str] = 
         return f"[错误] {e}"
 
 
+def tool_list_dir(path: str = ".") -> str:
+    """列出目录内容。"""
+    from pathlib import Path
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        return f"[错误] 路径不存在: {path}"
+    if not p.is_dir():
+        return f"[错误] 不是目录: {path}"
+    entries = []
+    for item in sorted(p.iterdir()):
+        prefix = "📁" if item.is_dir() else "📄"
+        size = f"{item.stat().st_size}" if item.is_file() else ""
+        entries.append(f"{prefix} {item.name} ({size})" if size else f"{prefix} {item.name}")
+    return "\n".join(entries[:50]) + (f"\n... ({len(entries)} 项)" if len(entries) > 50 else "")
+
+
+def tool_python_exec(code: str, timeout: int = 10) -> str:
+    """执行 Python 代码并返回输出。"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["python3", "-c", code],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        output = result.stdout
+        if result.stderr:
+            output += "\n[stderr]\n" + result.stderr[:500]
+        return output[:5000] if output else "(无输出)"
+    except subprocess.TimeoutExpired:
+        return f"[超时] Python 执行超过 {timeout} 秒"
+    except Exception as e:
+        return f"[错误] {e}"
+
+
 # ── 创建默认工具集 ─────────────────────────────────
 
 def create_default_tools() -> ToolRegistry:
@@ -171,4 +205,6 @@ def create_default_tools() -> ToolRegistry:
     registry.register("write_file", tool_write_file, "写入文件")
     registry.register("shell", tool_shell, "执行Shell命令")
     registry.register("search", tool_search_files, "搜索文件内容")
+    registry.register("list_dir", tool_list_dir, "列出目录内容")
+    registry.register("python_exec", tool_python_exec, "执行Python代码")
     return registry

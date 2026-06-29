@@ -318,6 +318,8 @@ class OpenLLMEngine:
         "write_file": {"required": ["path", "content"], "check": None},
         "shell": {"required": ["command"], "check": None},
         "search": {"required": ["pattern"], "check": None},
+        "list_dir": {"required": [], "check": None},
+        "python_exec": {"required": ["code"], "check": None},
     }
 
     def _verify_tool_params(self, tool_name: str, **kwargs) -> dict:
