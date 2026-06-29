@@ -207,4 +207,10 @@ def create_default_tools() -> ToolRegistry:
     registry.register("search", tool_search_files, "搜索文件内容")
     registry.register("list_dir", tool_list_dir, "列出目录内容")
     registry.register("python_exec", tool_python_exec, "执行Python代码")
+    
+    # 章鱼记忆系统
+    from .octopus import tool_octopus_search, tool_octopus_self_model
+    registry.register("octopus_search", tool_octopus_search, "搜索章鱼记忆（RECALL+jiak cards）")
+    registry.register("octopus_self_model", tool_octopus_self_model, "查看章鱼自省状态")
+    
     return registry

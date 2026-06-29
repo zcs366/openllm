@@ -320,6 +320,8 @@ class OpenLLMEngine:
         "search": {"required": ["pattern"], "check": None},
         "list_dir": {"required": [], "check": None},
         "python_exec": {"required": ["code"], "check": None},
+        "octopus_search": {"required": ["query"], "check": None},
+        "octopus_self_model": {"required": [], "check": None},
     }
 
     def _verify_tool_params(self, tool_name: str, **kwargs) -> dict:
