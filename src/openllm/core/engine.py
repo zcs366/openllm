@@ -262,10 +262,14 @@ class OpenLLMEngine:
 
     def _init_provider(self) -> bool:
         """初始化模型Provider。"""
-        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-        if not api_key:
-            return False
         try:
+            # Ollama 不需要 API key
+            if self.config.provider == "ollama":
+                api_key = "ollama"
+            else:
+                api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+                if not api_key:
+                    return False
             self.provider = create_provider(
                 self.config.provider,
                 model=self.config.model,
