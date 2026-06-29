@@ -126,6 +126,36 @@ def _get_isa_on_verify():
         _ISA_BELIEF_INITIALIZED = True
         return _ISA_ON_VERIFY
 
+# ── IKO trace消费集成（线程安全懒加载） ──────────────
+_IKO_CONSUME_INITIALIZED = False
+_IKO_CONSUME_LOCK = threading.Lock()
+_IKO_CONSUME_TRACE = None
+
+def _get_iko_consume_trace():
+    """线程安全地获取 IKO consume_trace 回调。懒加载。"""
+    global _IKO_CONSUME_INITIALIZED, _IKO_CONSUME_TRACE
+    if _IKO_CONSUME_INITIALIZED:
+        return _IKO_CONSUME_TRACE
+    with _IKO_CONSUME_LOCK:
+        if _IKO_CONSUME_INITIALIZED:
+            return _IKO_CONSUME_TRACE
+        iko_path = Path.home() / "projects" / "iko"
+        if not iko_path.exists():
+            logger.debug("IKO 目录不存在，跳过trace消费")
+            _IKO_CONSUME_INITIALIZED = True
+            return None
+        try:
+            if str(iko_path) not in sys.path:
+                sys.path.insert(0, str(iko_path))
+            from trace_consumer import consume_trace
+            _IKO_CONSUME_TRACE = consume_trace
+            logger.info("✅ IKO trace_consumer 已加载")
+        except Exception as e:
+            logger.warning(f"IKO trace_consumer 不可用: {e}")
+            _IKO_CONSUME_TRACE = None
+        _IKO_CONSUME_INITIALIZED = True
+        return _IKO_CONSUME_TRACE
+
 
 @dataclass
 class AgentConfig:
@@ -488,6 +518,20 @@ class OpenLLMEngine:
                 )
             except Exception as e:
                 logger.debug(f"ISA信念更新跳过: {e}")
+
+        # ── 血管 #4: IKO trace消费（工具调用→结构化trace） ──
+        iko_consume = _get_iko_consume_trace()
+        if iko_consume:
+            try:
+                iko_consume({
+                    "type": "verify_pass" if result.success else "verify_fail",
+                    "tool_name": tool_name,
+                    "params": {k: str(v)[:100] for k, v in kwargs.items()},
+                    "verdict": "pass" if result.success else "fail",
+                    "timestamp": time.time(),
+                })
+            except Exception as e:
+                logger.debug(f"IKO trace消费跳过: {e}")
 
         return result
 
