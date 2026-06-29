@@ -18,10 +18,20 @@ from typing import Any, Callable, Optional
 
 
 class PermissionLevel(IntEnum):
-    """权限等级。数字越大权限越高。"""
-    READ_ONLY = 1    # 只读
+    """权限等级。数字越大权限越高。
+
+    5种模式（扩展自Claude Code的3层）：
+      PLAN    = 0  规划模式：只读+分析，不执行
+      READ    = 1  只读模式：读文件、搜索、查看
+      WRITE   = 2  写入模式：写文件、本地执行
+      NETWORK = 3  网络模式：API调用、外部通信
+      ADMIN   = 4  管理模式：全部操作（破坏性操作需人工确认）
+    """
+    PLAN = 0       # 规划模式：只读+分析，不能执行
+    READ_ONLY = 1  # 只读
     LOCAL_WRITE = 2  # 本地写入+执行
-    NETWORK = 3      # 网络访问
+    NETWORK = 3    # 网络访问
+    ADMIN = 4      # 全权限（破坏性操作需人工确认）
 
 
 @dataclass
@@ -96,6 +106,11 @@ class PermissionGate:
 
     # 操作→所需权限等级映射
     ACTION_MAP: dict[str, PermissionLevel] = {
+        # L0 规划模式：只读+分析，不能执行
+        "analyze": PermissionLevel.PLAN,
+        "plan": PermissionLevel.PLAN,
+        "thought": PermissionLevel.PLAN,
+        "reason": PermissionLevel.PLAN,
         # L1 只读
         "read_file": PermissionLevel.READ_ONLY,
         "search": PermissionLevel.READ_ONLY,
@@ -114,6 +129,10 @@ class PermissionGate:
         "web_search": PermissionLevel.NETWORK,
         "send_message": PermissionLevel.NETWORK,
         "publish": PermissionLevel.NETWORK,
+        # L4 管理模式
+        "delete_file": PermissionLevel.ADMIN,
+        "delete_audit_entry": PermissionLevel.ADMIN,
+        "modify_policy": PermissionLevel.ADMIN,
     }
 
     # 安全基座操作——永远拒绝

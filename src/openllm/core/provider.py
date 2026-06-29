@@ -1,5 +1,5 @@
 """
-OpenLLM Model Provider — 模型接入层。
+OpenLLM Model Provider - 模型接入层。
 
 支持多Provider架构（对标CX）：
   - deepseek: DeepSeek API (默认)
@@ -8,14 +8,17 @@ OpenLLM Model Provider — 模型接入层。
 
 Phase 1: DeepSeek API 优先。
 """
-
 import json
 import os
 import time
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Optional, Generator
 import requests
+
+logger = logging.getLogger("openllm.provider")
 
 
 # ── 配置 ────────────────────────────────────────────
@@ -122,13 +125,17 @@ class DeepSeekProvider:
             resp.raise_for_status()
             data = resp.json()
             choice = data["choices"][0]
-            return ModelResponse(
+            usage = data.get("usage", {})
+            response = ModelResponse(
                 content=choice["message"]["content"],
                 model=data.get("model", self.config.model),
-                usage=data.get("usage", {}),
+                usage=usage,
                 latency_ms=(time.time() - t0) * 1000,
                 finish_reason=choice.get("finish_reason", "stop"),
             )
+            # 成本跟踪：写入model trace
+            self._record_model_trace(response, usage)
+            return response
         except requests.exceptions.RequestException as e:
             return ModelResponse(
                 content=f"[API错误] {e}",
@@ -169,17 +176,46 @@ class DeepSeekProvider:
                             on_token(token)
                     except (json.JSONDecodeError, KeyError):
                         continue
-            return ModelResponse(
+            response = ModelResponse(
                 content=full_content,
                 model=self.config.model,
                 latency_ms=(time.time() - t0) * 1000,
             )
+            # 成本跟踪：流式模式无usage数据，只记录latency
+            self._record_model_trace(response, {})
+            return response
         except requests.exceptions.RequestException as e:
             return ModelResponse(
                 content=f"[流式错误] {e}",
                 model="error",
                 latency_ms=(time.time() - t0) * 1000,
             )
+
+    def _record_model_trace(self, response: ModelResponse, usage: dict):
+        """记录模型调用成本数据。"""
+        try:
+            input_tokens = usage.get("prompt_tokens", 0)
+            output_tokens = usage.get("completion_tokens", 0)
+            # DeepSeek 定价估算: 输入$0.14/M, 输出$0.28/M
+            cost_usd = (input_tokens * 0.14 + output_tokens * 0.28) / 1_000_000
+            # 写入 ~/.io-s/traces/models.jsonl
+            trace_dir = Path.home() / ".io-s" / "traces"
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            record = {
+                "turn_id": f"t{int(time.time())}",
+                "model": response.model,
+                "provider": self.config.provider,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "latency_ms": response.latency_ms,
+                "cost_usd": round(cost_usd, 8),
+                "timestamp": time.time(),
+            }
+            cost_path = trace_dir / "models.jsonl"
+            with open(cost_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.debug(f"cost跟踪跳过: {e}")
 
 
 # ── Provider 工厂 ───────────────────────────────────
