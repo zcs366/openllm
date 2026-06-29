@@ -192,7 +192,7 @@ class AgentConfig:
     name: str = "OpenLLM"
     provider: str = DEFAULT_PROVIDER
     model: str = "deepseek-chat"
-    capsule_dir: str = "caps"
+    capsule_dir: str = str(Path.home() / "projects" / "openllm" / "caps")
     max_context_tokens: int = 8192
     checkpoint_interval: int = 10  # 每N轮自动checkpoint
     enable_io_s_checkpoint: bool = True
@@ -699,6 +699,7 @@ class OpenLLMEngine:
             session_id=f"s{int(time.time())}",
             decisions=decisions,
             insights=insights,
+            outputs=[m.content[:200] for m in assistant_msgs[-3:]],
         )
 
         # Δ向量（从真实对话文本提取）
@@ -706,6 +707,12 @@ class OpenLLMEngine:
         delta_vec = DeltaCapsule.from_text(text.session_id, session_text)
 
         path = self.memory.write(text, delta_vec)
+
+        # 保存完整对话历史
+        history_path = self.memory.capsule_dir / f"history_{text.session_id}.json"
+        with open(history_path, "w", encoding="utf-8") as f:
+            json.dump([{"role": m.role, "content": m.content} for m in self._history], f, ensure_ascii=False, indent=2)
+
         return f"💾 记忆已保存 → {path}"
 
     def status(self) -> dict:

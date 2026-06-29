@@ -2,6 +2,8 @@
 """OpenLLM CLI — 交互式对话入口"""
 import sys
 import os
+import signal
+import atexit
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
@@ -21,6 +23,15 @@ def main():
         model=args.model,
     )
     engine = OpenLLMEngine(config)
+
+    # 确保退出时保存记忆（Ctrl+C / 关闭终端 / /quit）
+    def save_on_exit():
+        try:
+            engine.sleep()
+        except Exception:
+            pass
+    atexit.register(save_on_exit)
+    signal.signal(signal.SIGINT, lambda *_: (save_on_exit(), sys.exit(0)))
 
     # 唤醒
     wake_msg = engine.wake()
@@ -51,6 +62,11 @@ def main():
         if user_input == '/tools':
             for t in engine.tools.list_tools():
                 print(f"  - {t['name']}: {t['description']}")
+            continue
+        if user_input == '/memory':
+            ctx = engine.memory.read()
+            import json
+            print(json.dumps(ctx, indent=2, ensure_ascii=False))
             continue
 
         response = engine.chat(user_input, stream=True)
