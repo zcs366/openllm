@@ -96,6 +96,36 @@ def _get_isn_metadata() -> tuple[list[dict], dict[str, dict]]:
         _ISN_METADATA_INITIALIZED = True
         return _ISN_METADATA, _ISN_METADATA_MAP
 
+# ── ISA 信念更新集成（线程安全懒加载） ──────────────
+_ISA_BELIEF_INITIALIZED = False
+_ISA_BELIEF_LOCK = threading.Lock()
+_ISA_ON_VERIFY = None
+
+def _get_isa_on_verify():
+    """线程安全地获取 ISA on_verify_result 回调。懒加载。"""
+    global _ISA_BELIEF_INITIALIZED, _ISA_ON_VERIFY
+    if _ISA_BELIEF_INITIALIZED:
+        return _ISA_ON_VERIFY
+    with _ISA_BELIEF_LOCK:
+        if _ISA_BELIEF_INITIALIZED:
+            return _ISA_ON_VERIFY
+        isa_path = Path.home() / "projects" / "isa"
+        if not isa_path.exists():
+            logger.debug("ISA 目录不存在，跳过信念更新")
+            _ISA_BELIEF_INITIALIZED = True
+            return None
+        try:
+            if str(isa_path) not in sys.path:
+                sys.path.insert(0, str(isa_path))
+            from belief_update import on_verify_result
+            _ISA_ON_VERIFY = on_verify_result
+            logger.info("✅ ISA belief_update 已加载")
+        except Exception as e:
+            logger.warning(f"ISA belief_update 不可用: {e}")
+            _ISA_ON_VERIFY = None
+        _ISA_BELIEF_INITIALIZED = True
+        return _ISA_ON_VERIFY
+
 
 @dataclass
 class AgentConfig:
@@ -444,6 +474,20 @@ class OpenLLMEngine:
         result_check = self._verify_tool_result(tool_name, result)
         if not result_check["pass"]:
             logger.warning(f"结果验证未通过: {tool_name}: {result_check['reason']}")
+
+        # ── 血管 #2: ISA 信念更新（verify → opinion 置信度） ──
+        isa_on_verify = _get_isa_on_verify()
+        if isa_on_verify:
+            try:
+                verdict = "pass" if result.success and result_check["pass"] else "fail"
+                isa_on_verify(
+                    tool_name=tool_name,
+                    params=kwargs,
+                    result={"output": result.output[:500], "error": result.error},
+                    verdict=verdict,
+                )
+            except Exception as e:
+                logger.debug(f"ISA信念更新跳过: {e}")
 
         return result
 
