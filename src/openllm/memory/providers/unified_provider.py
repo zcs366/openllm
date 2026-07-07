@@ -79,7 +79,7 @@ class UnifiedProvider:
             else:
                 continue
 
-            content = str(value) if value else key
+            content = value.get("content", str(value)) if isinstance(value, dict) else str(value)
 
             record = MemoryRecord(
                 record_id=f"unified:{key}",
@@ -113,7 +113,7 @@ class UnifiedProvider:
 
         try:
             entry = self._memory.store(
-                key=f"{request.source}:{int(time.time())}",
+                key=f"{request.source}:{request.record_type}:{int(time.time()*1000)}",
                 value={"content": request.content, "source": request.source},
                 importance=request.importance,
                 layer=request.metadata.get("layer", "warm"),

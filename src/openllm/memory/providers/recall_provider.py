@@ -12,18 +12,39 @@ RecallProvider — RECALL时间线日志provider
 
 import json
 import time
+import math
 import logging
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..memory_bus import (
-    MemoryProvider, MemoryRecord, WriteRequest, WriteResult, Query
+    MemoryProvider, MemoryRecord, WriteRequest, WriteResult, Query, tokenize
 )
 
 logger = logging.getLogger("openllm.providers.recall")
 
 JIAK_DIR = Path.home() / ".hermes" / "jiak"
 RECALL_PATH = JIAK_DIR / "RECALL.jsonl"
+
+# 模块级import recall_append（避免sys.path堆积）
+_recall_append = None
+_recall_append_loaded = False
+
+def _get_recall_append():
+    global _recall_append, _recall_append_loaded
+    if not _recall_append_loaded:
+        _recall_append_loaded = True
+        try:
+            # 只在首次调用时添加路径
+            jiak_str = str(JIAK_DIR)
+            if jiak_str not in sys.path:
+                sys.path.insert(0, jiak_str)
+            from recall_append import validate_and_append
+            _recall_append = validate_and_append
+        except ImportError:
+            pass
+    return _recall_append
 
 
 class RecallProvider:
@@ -49,7 +70,7 @@ class RecallProvider:
             return []
 
         query_lower = query.text.lower()
-        query_words = set(query_lower.split())
+        query_words = tokenize(query.text)
         matched = []
 
         for rec in records:
@@ -73,7 +94,7 @@ class RecallProvider:
                 score *= (0.7 + 0.3 * time_factor)
 
             record = MemoryRecord(
-                record_id=f"recall:{rec.get('id', str(ts))}",
+                record_id=f"recall:{hash(content) % 10**8}",
                 content=content[:500],  # 截断过长内容
                 source="recall",
                 record_type=rec.get("type", "event"),
@@ -107,11 +128,14 @@ class RecallProvider:
         RECALL写入——通过recall_append.py写入。
         MemoryBus不直接写jsonl，调用现有的recall_append接口。
         """
-        try:
-            import sys
-            sys.path.insert(0, str(self._path.parent))
-            from recall_append import validate_and_append
+        validate_and_append = _get_recall_append()
+        if validate_and_append is None:
+            return WriteResult(
+                success=False,
+                reason="recall_append.py not available",
+            )
 
+        try:
             record = {
                 "content": request.content,
                 "type": request.record_type,
@@ -136,11 +160,6 @@ class RecallProvider:
                     success=False,
                     reason=result.get("error", "recall_append failed"),
                 )
-        except ImportError:
-            return WriteResult(
-                success=False,
-                reason="recall_append.py not available",
-            )
         except Exception as e:
             return WriteResult(
                 success=False,
@@ -196,5 +215,4 @@ class RecallProvider:
         if timestamp == 0:
             return 0.5
         age_hours = (time.time() - timestamp) / 3600
-        import math
         return math.exp(-0.029 * age_hours)

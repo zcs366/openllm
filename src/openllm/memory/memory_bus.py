@@ -15,11 +15,39 @@ ISA和ICE的唯一记忆接口。替代五套存储的直连模式。
 """
 
 import time
+import math
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 logger = logging.getLogger("openllm.memory_bus")
+
+# ── 中文分词（jieba懒加载） ──
+_jieba = None
+
+def _get_jieba():
+    global _jieba
+    if _jieba is None:
+        try:
+            import jieba as _jb
+            _jieba = _jb
+        except ImportError:
+            _jieba = False  # 标记不可用，fallback到split
+    return _jieba
+
+def tokenize(text: str) -> set:
+    """
+    中英文混合分词。中文走jieba，英文走split。
+    返回去重关键词集合（小写，长度>1）。
+    """
+    if not text:
+        return set()
+    jb = _get_jieba()
+    if jb is not None and jb is not False:
+        words = list(jb.cut(text.lower()))
+    else:
+        words = text.lower().split()
+    return {w for w in words if len(w) > 1 and w.strip()}
 
 
 # ═══════════════════════════════════════════════
@@ -264,7 +292,7 @@ class MemoryBus:
                 break
             est_tokens = estimate_tokens(r.content)
             if used_tokens + est_tokens > query.token_budget:
-                continue
+                break  # 后面的更大，直接停止
             selected.append(r)
             used_tokens += est_tokens
 

@@ -11,11 +11,12 @@ CausalProvider — 因果记忆provider
 """
 
 import time
+import math
 import logging
 from typing import Any, Dict, List, Optional
 
 from ..memory_bus import (
-    MemoryProvider, MemoryRecord, WriteRequest, WriteResult, Query
+    MemoryProvider, MemoryRecord, WriteRequest, WriteResult, Query, tokenize
 )
 
 logger = logging.getLogger("openllm.providers.causal")
@@ -51,10 +52,8 @@ class CausalProvider:
         """从因果记忆中检索"""
         self._ensure_store()
 
-        # 从query文本提取context_features
-        features = query.text.lower().split()
-        # 过滤停用词
-        features = [f for f in features if len(f) > 1]
+        # 从query文本提取context_features（jieba中文分词）
+        features = list(tokenize(query.text))
 
         if not features:
             return []
@@ -80,8 +79,7 @@ class CausalProvider:
 
             # score = confidence × (1 + log(frequency))
             confidence = getattr(cr, "prediction_confidence", 0.5)
-            frequency = getattr(cr, "frequency", 1) if hasattr(cr, "frequency") else 1
-            import math
+            frequency = getattr(cr, "frequency", 1)
             score = confidence * (1 + math.log(max(frequency, 1)))
 
             record = MemoryRecord(

@@ -13,12 +13,13 @@ JiakProvider — jiak卡片记忆provider
 
 import json
 import time
+import math
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..memory_bus import (
-    MemoryProvider, MemoryRecord, WriteRequest, WriteResult, Query
+    MemoryProvider, MemoryRecord, WriteRequest, WriteResult, Query, tokenize
 )
 
 logger = logging.getLogger("openllm.providers.jiak")
@@ -48,8 +49,8 @@ class JiakProvider:
         if not index:
             return []
 
-        # 关键词匹配
-        query_keywords = set(query.text.lower().split())
+        # 关键词匹配（jieba中文分词）
+        query_keywords = tokenize(query.text)
         matched_cards = []
 
         for card_id, card_meta in index.get("cards", {}).items():
@@ -169,5 +170,4 @@ class JiakProvider:
             return 0.5
         age_hours = (time.time() - created) / 3600
         # 指数衰减，24h半衰期
-        import math
         return math.exp(-0.029 * age_hours)
