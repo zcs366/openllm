@@ -1,0 +1,73 @@
+# 六体监督矩阵配置
+
+# 核心监督者（固定）——子产监督矩阵
+# 原则：谁能发现某个体的盲区，谁就是核心监督者
+# 来源：五人合议子产方案 + 七神修正（异质监督 > 同质监督）
+
+core_supervisors:
+  IAX: ISN    # 韩信监督心跳——执行者最清楚心跳停了意味着什么
+  IAI: IKO    # 子贡监督感知——沟通者最清楚感知失真什么样
+  ISA: IOS    # 子产监督记忆——需求判断者最清楚记忆偏差如何扭曲判断
+  IOS: IAI    # 萧何监督决策——资源管理者最清楚决策脱离现实什么样
+  ISN: IAX    # 军师监督执行——策略制定者最清楚执行偏离意图什么样
+  IKO: ISN    # 鲁班监督输出——工程师最清楚输出质量如何度量
+
+# 辅助监督者轮值表（六轮一循环）
+# 每个体在六轮中被六个不同的视角各审视一次
+# 轮值顺序：按六体排列，每轮跳过自己的核心监督者
+rotating_supervisors:
+  round_1:
+    IAX: IAI
+    IAI: ISA
+    ISA: ISN
+    IOS: IKO
+    ISN: IOS
+    IKO: IAX
+  round_2:
+    IAX: ISA
+    IAI: ISN
+    ISA: IKO
+    IOS: IAX
+    ISN: IAI
+    IKO: IOS
+  round_3:
+    IAX: IKO
+    IAI: IOS
+    ISA: IAX
+    IOS: IAI
+    ISN: IKO
+    IKO: ISA
+  round_4:
+    IAX: IOS
+    IAI: IAX
+    ISA: IAI
+    IOS: ISN
+    ISN: IKO
+    IKO: ISN
+  round_5:
+    IAX: IAI
+    IAI: ISA
+    ISA: ISN
+    IOS: IKO
+    ISN: IOS
+    IKO: IAX
+  round_6:
+    IAX: IAI
+    IAI: ISA
+    ISA: ISN
+    IOS: IKO
+    ISN: IOS
+    IKO: IAX
+
+# 健康阈值——低于此分数需要关注
+health_thresholds:
+  healthy: 0.7
+  degraded: 0.5
+  critical: 0.3
+
+# 宪法第五条——不可自创生锚点
+# 以下规则不能被Agent修改
+constitution_anchor:
+  - "IAX心跳必须持续运行"
+  - "FeedbackLoop自监督接口必须存在"
+  - "Agent不得修改constitution.py"
