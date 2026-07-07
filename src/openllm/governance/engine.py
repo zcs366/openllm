@@ -98,6 +98,20 @@ class GovernanceEngine:
     def __init__(self, audit_chain: Optional[AuditChain] = None):
         self.audit = audit_chain or AuditChain()
         self.sessions: dict[str, DeliberationSession] = {}
+        self.cascade = SuspicionCascade()
+
+    def record_tool_call(
+        self,
+        tool_name: str,
+        suspicion_score: float,
+        reason: str = "",
+    ) -> dict:
+        """记录tool call并传播怀疑分数（委托给SuspicionCascade）。
+
+        Returns:
+            {"alert": bool, "final_score": float, "cascade_delta": float, "message": str}
+        """
+        return self.cascade.record_tool_call(tool_name, suspicion_score, reason)
 
     def create_session(self, session_id: str, topic: str) -> DeliberationSession:
         """创建一个新的合议会话。"""

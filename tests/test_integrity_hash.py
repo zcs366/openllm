@@ -1,5 +1,10 @@
 """integrity_hash 测试 — PAL P0-2
 2026-07-07
+
+⚠️ 外部依赖测试: 本测试验证SHA-256完整性hash算法的正确性。
+hash算法本身与 ~/.hermes/jiak/scripts/recall_append.py 中的实现一致，
+但本测试自包含（独立定义compute_hash），不依赖jiak路径。
+验证目标: 算法逻辑（确定性/篡改检测/字段排除），非recall_append.py集成。
 """
 import hashlib
 import json

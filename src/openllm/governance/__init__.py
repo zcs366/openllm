@@ -27,7 +27,7 @@ from .events import (
     VotePosition,
     AgentRole,
 )
-from .engine import GovernanceEngine, DeliberationSession
+from .engine import GovernanceEngine, DeliberationSession, SuspicionCascade, SuspicionEntry
 from .audit import AuditChain, ReasoningAuditLogger
 from .stateful_audit import StatefulAuditTrail, AuditRecord, AlertRecord
 from .reliability import (
@@ -36,6 +36,7 @@ from .reliability import (
     ReliabilityDimension, Severity, RepairAction,
     ReliabilityEvent, RepairResult, HealthSnapshot,
 )
+from .substrate import SubstrateEnforcer, CompiledConstraint, SubstrateGuide
 
 __all__ = [
     "GovernanceEvent",
@@ -66,4 +67,9 @@ __all__ = [
     "ReliabilityEvent",
     "RepairResult",
     "HealthSnapshot",
+    "SuspicionCascade",
+    "SuspicionEntry",
+    "SubstrateEnforcer",
+    "CompiledConstraint",
+    "SubstrateGuide",
 ]

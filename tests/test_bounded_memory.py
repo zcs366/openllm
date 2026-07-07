@@ -1,5 +1,10 @@
 """BoundedMemoryContract 测试 — PAL P1-1
 2026-07-07
+
+⚠️ 外部依赖测试: 本测试通过 sys.path 引用 ~/.hermes/jiak/scripts/isa_context_editor.py。
+BoundedMemoryContract 的源码不在 openllm 项目内，属于 jiak 工具库。
+测试使用 __new__() + mock 绕过依赖（jieba/context_router），验证预算逻辑。
+验证目标: 预算模式/选择性遗忘/紧急压缩算法，非 openllm 集成。
 """
 import unittest
 from unittest.mock import MagicMock, patch
