@@ -127,10 +127,11 @@ class ISA:
         session_id: str = "",
     ) -> Optional[MemoryEntry]:
         """
-        存储记忆——经过免疫系统验证。
+        [DEPRECATED] 存储记忆——请改用 bus_write()。
         
-        路径：写入请求 → 免疫检查 → 通过→存储 | 拦截→审计+拒绝
+        旧路径保留向后兼容，新代码必须使用 bus_write(WriteRequest(...))。
         """
+        logger.warning("⚠️ ISA.store()已废弃，请改用ISA.bus_write(WriteRequest(...))")
         # 免疫检查
         trust_enum = TrustLevel(trust_level) if trust_level in [t.value for t in TrustLevel] else TrustLevel.UNKNOWN
         request = ImmuneWriteRequest(
@@ -172,8 +173,9 @@ class ISA:
         session_id: str = "",
     ) -> CausalMemory:
         """
-        存储因果记忆——零LLM调用，原文存储。
+        [DEPRECATED] 存储因果记忆——请改用 bus_write(WriteRequest(..., record_type="lesson"))。
         """
+        logger.warning("⚠️ ISA.store_causal()已废弃，请改用ISA.bus_write(WriteRequest(...))")
         trust_enum = TrustLevel(trust_level) if trust_level in [t.value for t in TrustLevel] else TrustLevel.INTERNAL
         
         # 免疫检查（Sleeper防御·P0-3修复）
@@ -214,10 +216,11 @@ class ISA:
         include_causal: bool = True,
     ) -> Dict[str, Any]:
         """
-        智能检索——结合温度记忆+因果记忆。
+        [DEPRECATED] 智能检索——请改用 bus_query(Query(...))。
         
-        返回结构化结果，带相关性评分（元认知反馈用）。
+        旧路径保留向后兼容，新代码必须使用 bus_query(Query(...))。
         """
+        logger.warning("⚠️ ISA.retrieve()已废弃，请改用ISA.bus_query(Query(...))")
         results = {
             "memory_results": [],
             "causal_results": [],
