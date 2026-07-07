@@ -73,12 +73,33 @@ class SubstrateEnforcer:
         self._schema_hash: Optional[str] = None
 
     def load_schema(self) -> List[dict]:
-        """加载constraint_schema.json。"""
+        """加载constraint_schema.json。
+
+        支持三种格式:
+        1. 约束实例列表: [{"id": "c1", ...}, ...]
+        2. {"constraints": [...]} 或 {"items": [...list...]}
+        3. JSON Schema格式: {"examples": [[{约束实例}]]} — 取examples[0]
+        """
         if not self.schema_path.exists():
             return []
         with open(self.schema_path, "r", encoding="utf-8") as f:
             schema = json.load(f)
-        return schema if isinstance(schema, list) else schema.get("items", [])
+        if isinstance(schema, list):
+            return schema
+        # 直接constraints/items是list的情况
+        for key in ("constraints", "items"):
+            val = schema.get(key)
+            if isinstance(val, list) and val:
+                return val
+        # JSON Schema格式: examples是[[{约束实例}]]
+        examples = schema.get("examples")
+        if isinstance(examples, list) and examples:
+            first = examples[0]
+            if isinstance(first, list):
+                return first
+            if isinstance(first, dict):
+                return [first]
+        return []
 
     def compile(self) -> str:
         """将约束编译为in-context提示。
