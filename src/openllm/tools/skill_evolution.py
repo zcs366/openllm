@@ -89,21 +89,18 @@ class SkillEvolution:
             return False
         
         try:
-            # 添加到sys.path - 注意：world_model_evolver.py在jiak目录下
-            jiak_dir = str(JIAK_HOME)
-            if jiak_dir not in sys.path:
-                sys.path.insert(0, jiak_dir)
-            
-            # 导入模块
-            from world_model_evolver import (
-                record_prediction,
-                record_observation,
-                cluster_failures,
-                set_confidence,
-                get_card_confidence,
-                get_mismatches,
-                refine_card,
-            )
+            import importlib.util as _ilu
+            _spec = _ilu.spec_from_file_location("world_model_evolver", JIAK_HOME / "world_model_evolver.py")
+            if _spec and _spec.loader:
+                _mod = _ilu.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
+                record_prediction = _mod.record_prediction
+                record_observation = _mod.record_observation
+                cluster_failures = _mod.cluster_failures
+                set_confidence = _mod.set_confidence
+                get_card_confidence = _mod.get_card_confidence
+                get_mismatches = _mod.get_mismatches
+                refine_card = _mod.refine_card
             
             self._record_prediction = record_prediction
             self._record_observation = record_observation

@@ -28,6 +28,29 @@ from ..identity.soul import (
 )
 from ..identity.iam_integration import IamIntegration, create_iam_integration
 from ..security.gate import SecurityFoundation
+from .message_bus import MessageQueue
+from ..protocol import MessageType, BodyName
+
+
+def _lazy_import(module_path: Path, module_name: str):
+    """从指定路径懒加载模块，不污染sys.path。"""
+    import importlib.util
+    if not module_path.exists():
+        return None
+    try:
+        if module_path.is_dir():
+            spec = importlib.util.spec_from_file_location(
+                module_name, module_path / "__init__.py")
+        else:
+            spec = importlib.util.spec_from_file_location(
+                module_name, module_path)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
 from ..security.graceful_shutdown import GracefulShutdown
 from ..security.credential_firewall import CredentialFirewall
 from ..tools.executor import ToolRegistry, ToolResult, create_default_tools
@@ -65,11 +88,10 @@ def _get_checkpoint_manager():
             _CHECKPOINT_MANAGER_INITIALIZED = True
             _CHECKPOINT_MANAGER = None
             return None
-        if str(io_s_path) not in sys.path:
-            sys.path.insert(0, str(io_s_path))
         try:
-            from syscall.checkpoint import CheckpointManager
-            _CHECKPOINT_MANAGER = CheckpointManager(interval=300, auto_start=False)
+            _io_s_mod = _lazy_import(io_s_path / "syscall" / "checkpoint", "io_s_checkpoint")
+            if _io_s_mod and hasattr(_io_s_mod, 'CheckpointManager'):
+                _CHECKPOINT_MANAGER = _io_s_mod.CheckpointManager(interval=300, auto_start=False)
             logger.info("✅ IO-S CheckpointManager 已加载")
         except Exception as e:
             logger.warning(f"IO-S Checkpoint 不可用: {e}")
@@ -97,10 +119,9 @@ def _get_isn_metadata() -> tuple[list[dict], dict[str, dict]]:
             _ISN_METADATA_INITIALIZED = True
             return _ISN_METADATA, _ISN_METADATA_MAP
         try:
-            isn_parent = str(isn_path.parent)  # ~/isn 的父目录
-            if isn_parent not in sys.path:
-                sys.path.insert(0, isn_parent)
-            from isn.router.integration import export_tool_metadata
+            _isn_mod = _lazy_import(isn_path / "router" / "integration", "isn_integration")
+            if _isn_mod and hasattr(_isn_mod, 'export_tool_metadata'):
+                export_tool_metadata = _isn_mod.export_tool_metadata
             _ISN_METADATA = export_tool_metadata()
             _ISN_METADATA_MAP = {m["name"]: m for m in _ISN_METADATA}
             logger.info(f"✅ ISN 元数据已加载: {len(_ISN_METADATA)} 条工具")
@@ -130,10 +151,11 @@ def _get_isa_on_verify():
             _ISA_BELIEF_INITIALIZED = True
             return None
         try:
-            if str(isa_path) not in sys.path:
-                sys.path.insert(0, str(isa_path))
-            from belief_update import on_verify_result
-            _ISA_ON_VERIFY = on_verify_result
+            _isa_mod = _lazy_import(isa_path / "belief_update", "isa_belief_update")
+            if _isa_mod and hasattr(_isa_mod, 'on_verify_result'):
+                _ISA_ON_VERIFY = _isa_mod.on_verify_result
+            else:
+                _ISA_ON_VERIFY = None
             logger.info("✅ ISA belief_update 已加载")
         except Exception as e:
             logger.warning(f"ISA belief_update 不可用: {e}")
@@ -160,10 +182,11 @@ def _get_iko_consume_trace():
             _IKO_CONSUME_INITIALIZED = True
             return None
         try:
-            if str(iko_path) not in sys.path:
-                sys.path.insert(0, str(iko_path))
-            from trace_consumer import consume_trace
-            _IKO_CONSUME_TRACE = consume_trace
+            _iko_mod = _lazy_import(iko_path / "trace_consumer", "iko_trace_consumer")
+            if _iko_mod and hasattr(_iko_mod, 'consume_trace'):
+                _IKO_CONSUME_TRACE = _iko_mod.consume_trace
+            else:
+                _IKO_CONSUME_TRACE = None
             logger.info("✅ IKO trace_consumer 已加载")
         except Exception as e:
             logger.warning(f"IKO trace_consumer 不可用: {e}")
@@ -189,10 +212,11 @@ def _get_isa_schema_matches():
             _ISA_OPINION_INITIALIZED = True
             return None
         try:
-            if str(isa_path) not in sys.path:
-                sys.path.insert(0, str(isa_path))
-            from opinion_manager import schema_matches
-            _ISA_SCHEMA_MATCHES = schema_matches
+            _isa_mod2 = _lazy_import(isa_path / "opinion_manager", "isa_opinion_manager")
+            if _isa_mod2 and hasattr(_isa_mod2, 'schema_matches'):
+                _ISA_SCHEMA_MATCHES = _isa_mod2.schema_matches
+            else:
+                _ISA_SCHEMA_MATCHES = None
             logger.info("✅ ISA opinion_manager.schema_matches 已加载")
         except Exception as e:
             logger.warning(f"ISA opinion_manager 不可用: {e}")
@@ -313,8 +337,57 @@ class OpenLLMEngine:
         self._run_pipeline = run_pipeline
         self._inject_hindsight = inject_hindsight
 
+        # P1-1: 消息总线——六体通过publish/subscribe通信
+        self.bus = MessageQueue()
+        self._register_blood_vessels()
+
         # P0: 启动安全审计（不阻塞）
         self._startup_audit()
+
+    def _register_blood_vessels(self):
+        """注册5个血管handler到消息总线。"""
+        # 血管#2: IOS→ISA（verify结果→信念更新）
+        def _vessel_2_verify(envelope):
+            isa_fn = _get_isa_on_verify()
+            if isa_fn:
+                isa_fn(
+                    tool_name=envelope.payload.get("tool_name", ""),
+                    params=envelope.payload.get("params", {}),
+                    result=envelope.payload.get("result", {}),
+                    verdict=envelope.payload.get("verdict", "pass"),
+                )
+        self.bus.subscribe(MessageType.GOVERNANCE_EVENT, _vessel_2_verify)
+
+        # 血管#3: ISN→IOS（工具风险检查）
+        def _vessel_3_risk(envelope):
+            risk = self._check_tool_risk(envelope.payload.get("tool_name", ""))
+            envelope.payload["risk_result"] = risk
+        self.bus.subscribe(MessageType.TOOL_INVOCATION, _vessel_3_risk)
+
+        # 血管#4: IOS→IKO（工具调用→trace消费）
+        def _vessel_4_trace(envelope):
+            iko_fn = _get_iko_consume_trace()
+            if iko_fn:
+                iko_fn(envelope.payload)
+        self.bus.subscribe(MessageType.OBSERVABILITY_LOG, _vessel_4_trace)
+
+        # 血管#5: IKO→ISA（schema验证→质量信号）
+        def _vessel_5_schema(envelope):
+            schema_fn = _get_isa_schema_matches()
+            if schema_fn and envelope.payload.get("success"):
+                schema_fn(
+                    task_type="tool_call",
+                    result={
+                        "output": envelope.payload.get("output", "")[:1000],
+                        "error": envelope.payload.get("error"),
+                    },
+                )
+        self.bus.subscribe(MessageType.DECISION_RESULT, _vessel_5_schema)
+
+        # 血管#1: ISA→IOS（记忆查询→决策上下文）——预留
+        def _vessel_1_memory(envelope):
+            pass  # 预留，等ISA记忆查询接口稳定后接入
+        self.bus.subscribe(MessageType.MEMORY_QUERY, _vessel_1_memory)
 
     def _init_provider(self) -> bool:
         """初始化模型Provider。支持：deepseek/openai/anthropic/gemini/ollama。"""
@@ -514,7 +587,7 @@ class OpenLLMEngine:
 
         mem_ctx = self.memory.read()
         session_ctx = {
-            "relationship_depth": "\u8001\u642d\u6863",
+            "relationship_depth": "老搭档",
             "topic": "general",
         }
         identity = self.reconstructor.reconstruct(session_ctx, mem_ctx)
@@ -547,7 +620,24 @@ class OpenLLMEngine:
                     lines.append(f"  💡 {i}")
                 if unresolved:
                     lines.append(f"  ❓ 未解：{unresolved[0]}")
-        lines.append(f"🟢 {self.config.name} 已苏醒。")
+
+        # P0: Ollama健康检查
+        if self.config.provider == "ollama":
+            try:
+                import urllib.request
+                req = urllib.request.urlopen("http://localhost:11434/api/tags", timeout=3)
+                models = json.loads(req.read()).get("models", [])
+                model_names = [m["name"] for m in models]
+                if self.config.model not in model_names:
+                    lines.append(f"⚠️ 模型 {self.config.model} 未找到。可用: {', '.join(model_names)}")
+                else:
+                    lines.append(f"🟢 {self.config.name} 已苏醒。")
+            except Exception:
+                lines.append(f"🔴 Ollama未运行。请先执行 `ollama serve` 启动服务。")
+                lines.append(f"🟢 {self.config.name} 已苏醒（离线模式）。")
+        else:
+            lines.append(f"🟢 {self.config.name} 已苏醒。")
+
         if self.connected:
             lines.append(f"🔗 模型：{self.config.model}")
         else:
@@ -608,6 +698,23 @@ class OpenLLMEngine:
         # Agent Loop: plan
         ctx = self.loop.turn(user_input)
         self._history.append(Message(role="user", content=user_input))
+
+        # P1-3: 记忆注入——从MemoryOS检索相关记忆注入prompt
+        try:
+            mem_ctx = self.memory.read()
+            if mem_ctx.get("status") == "restored":
+                mem_parts = []
+                decisions = mem_ctx.get("decisions", [])
+                insights = mem_ctx.get("insights", [])
+                if decisions:
+                    mem_parts.append("过去决策: " + "; ".join(decisions[:3]))
+                if insights:
+                    mem_parts.append("过去洞察: " + "; ".join(insights[:2]))
+                if mem_parts:
+                    memory_injection = "[记忆上下文] " + " | ".join(mem_parts)
+                    self._history.append(Message(role="system", content=memory_injection))
+        except Exception as e:
+            logger.debug(f"记忆注入跳过: {e}")
 
         # 限制 history 长度，防止无限膨胀
         if len(self._history) > self.MAX_HISTORY_TURNS * 2:
@@ -700,8 +807,32 @@ class OpenLLMEngine:
                 return ToolResult(
                     tool_name=tool_name, success=False,
                     error=f"安全管线拦截: {pipeline_result.alerts}")
+        except ImportError:
+            # pipeline模块不可用——跳过（降级模式）
+            logger.info(f"安全管线不可用，跳过 {tool_name} 安全检查")
         except Exception as e:
-            logger.debug(f"安全管线跳过: {e}")
+            # 安全管线异常——必须记录且向上报告，不能静默
+            logger.error(f"安全管线异常 {tool_name}: {e}")
+            return ToolResult(
+                tool_name=tool_name, success=False,
+                error=f"安全管线异常: {e}")
+
+        # ── IOS拒绝检查（安全管线之后、参数验证之前） ──
+        try:
+            from .governance_engine import GovernanceEngine
+            gov = GovernanceEngine()
+            # 高风险指令自动拒绝（ISN critical级别）
+            if risk_check.get("level") == "critical":
+                rejection = gov.reject(
+                    instruction=tool_name,
+                    reason=f"ISN标记为critical级别工具: {tool_name}",
+                    belief_confidence=0.95,
+                )
+                return ToolResult(
+                    tool_name=tool_name, success=False,
+                    error=f"IOS拒绝: {rejection.reason}")
+        except Exception as e:
+            logger.debug(f"IOS拒绝检查跳过: {e}")
 
         # ── verify钩子：调用前参数验证 ──
         param_check = self._verify_tool_params(tool_name, **kwargs)
@@ -725,45 +856,42 @@ class OpenLLMEngine:
             logger.warning(f"结果验证未通过: {tool_name}: {result_check['reason']}")
 
         # ── 血管 #2: ISA 信念更新（verify → opinion 置信度） ──
-        isa_on_verify = _get_isa_on_verify()
-        if isa_on_verify:
-            try:
-                verdict = "pass" if result.success and result_check["pass"] else "fail"
-                isa_on_verify(
-                    tool_name=tool_name,
-                    params=kwargs,
-                    result={"output": result.output[:500], "error": result.error},
-                    verdict=verdict,
-                )
-            except Exception as e:
-                logger.debug(f"ISA信念更新跳过: {e}")
+        verdict = "pass" if result.success and result_check["pass"] else "fail"
+        self.bus.publish(
+            MessageType.GOVERNANCE_EVENT,
+            source=BodyName.IOS, target=BodyName.ISA,
+            payload={
+                "tool_name": tool_name,
+                "params": kwargs,
+                "result": {"output": result.output[:500], "error": result.error},
+                "verdict": verdict,
+            },
+        )
 
         # ── 血管 #4: IKO trace消费（工具调用→结构化trace） ──
-        iko_consume = _get_iko_consume_trace()
-        if iko_consume:
-            try:
-                iko_consume({
-                    "type": "verify_pass" if result.success else "verify_fail",
-                    "tool_name": tool_name,
-                    "params": {k: str(v)[:100] for k, v in kwargs.items()},
-                    "verdict": "pass" if result.success else "fail",
-                    "timestamp": time.time(),
-                })
-            except Exception as e:
-                logger.debug(f"IKO trace消费跳过: {e}")
+        self.bus.publish(
+            MessageType.OBSERVABILITY_LOG,
+            source=BodyName.IOS, target=BodyName.IKO,
+            payload={
+                "type": "verify_pass" if result.success else "verify_fail",
+                "tool_name": tool_name,
+                "params": {k: str(v)[:100] for k, v in kwargs.items()},
+                "verdict": "pass" if result.success else "fail",
+                "timestamp": time.time(),
+            },
+        )
 
         # ── 血管 #5: IKO→ISA 反馈闭环（schema验证→质量信号） ──
-        isa_schema = _get_isa_schema_matches()
-        if isa_schema and result.success:
-            try:
-                schema_result = isa_schema(
-                    task_type="tool_call",
-                    result={"output": result.output[:1000], "error": result.error},
-                )
-                if not schema_result["passed"]:
-                    logger.info(f"ISA schema验证: {tool_name} 未通过 {schema_result['failures']}")
-            except Exception as e:
-                logger.debug(f"ISA schema验证跳过: {e}")
+        if result.success:
+            self.bus.publish(
+                MessageType.DECISION_RESULT,
+                source=BodyName.IKO, target=BodyName.ISA,
+                payload={
+                    "success": True,
+                    "output": result.output[:1000],
+                    "error": result.error,
+                },
+            )
 
         return result
 

@@ -13,8 +13,18 @@ import sys
 import tempfile
 import unittest
 
-# 添加jiak scripts到path
-sys.path.insert(0, os.path.expanduser("~/.hermes/jiak/scripts"))
+# 添加jiak scripts到path（仅在未被污染时）
+_jiak_path = os.path.expanduser("~/.hermes/jiak/scripts")
+if _jiak_path not in sys.path:
+    sys.path.insert(0, _jiak_path)
+
+# 检测recall_append是否可用
+_RECALL_APPEND_AVAILABLE = False
+try:
+    from recall_append import enrich_metadata, validate_line
+    _RECALL_APPEND_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):
+    pass
 
 
 def compute_hash(obj: dict) -> str:
@@ -59,17 +69,17 @@ class TestIntegrityHash(unittest.TestCase):
         h2 = compute_hash(obj)
         self.assertEqual(h1, h2)
 
+    @unittest.skipUnless(_RECALL_APPEND_AVAILABLE, "recall_append不可用")
     def test_enrich_metadata_adds_hash(self):
         """enrich_metadata为新记录添加integrity_hash。"""
-        from recall_append import enrich_metadata
         obj = {"type": "note", "content": "test content"}
         enriched = enrich_metadata(obj)
         self.assertIn("integrity_hash", enriched)
         self.assertEqual(len(enriched["integrity_hash"]), 64)  # SHA-256 hex
 
+    @unittest.skipUnless(_RECALL_APPEND_AVAILABLE, "recall_append不可用")
     def test_validate_line_preserves_hash(self):
         """validate_line中hash基于原始字段（不含enriched字段）。"""
-        from recall_append import validate_line
         obj = {"type": "note", "content": "test"}
         obj["integrity_hash"] = compute_hash(obj)
         line = json.dumps(obj, ensure_ascii=False)
@@ -80,9 +90,9 @@ class TestIntegrityHash(unittest.TestCase):
         original_hash = compute_hash({"type": "note", "content": "test"})
         self.assertEqual(obj["integrity_hash"], original_hash)
 
+    @unittest.skipUnless(_RECALL_APPEND_AVAILABLE, "recall_append不可用")
     def test_tamper_detection(self):
         """篡改后hash不匹配（但不拒绝——向后兼容）。"""
-        from recall_append import validate_line
         obj = {"type": "note", "content": "original"}
         obj["integrity_hash"] = compute_hash(obj)
         # 篡改content
@@ -94,9 +104,9 @@ class TestIntegrityHash(unittest.TestCase):
         # hash不匹配
         self.assertNotEqual(result["integrity_hash"], compute_hash({"type": "note", "content": "tampered"}))
 
+    @unittest.skipUnless(_RECALL_APPEND_AVAILABLE, "recall_append不可用")
     def test_backward_compatible_no_hash(self):
         """旧记录（无integrity_hash）正常通过验证。"""
-        from recall_append import validate_line
         obj = {"type": "note", "content": "old record"}
         line = json.dumps(obj, ensure_ascii=False)
         result = validate_line(line)

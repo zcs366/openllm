@@ -13,6 +13,7 @@ import os
 import sys
 import tempfile
 import json
+import pytest
 from pathlib import Path
 
 sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
@@ -100,11 +101,15 @@ def test_e2e_mistake_to_causal_pipeline():
         return True
 
 
+@pytest.mark.integration
 def test_write_gate_integration():
     """测试写门控在真实场景中的行为"""
     import sys as _sys
     _sys.path.insert(0, os.path.expanduser("~/.hermes/jiak"))
-    from belief_update import write_gate
+    try:
+        from belief_update import write_gate
+    except ImportError:
+        pytest.skip("jiak belief_update 不可用")
 
     print("\n测试写门控集成:")
 

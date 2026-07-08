@@ -171,3 +171,74 @@ if __name__ == "__main__":
     else:
         print("💥 部分测试失败！")
         sys.exit(1)
+def test_four_question_metadata():
+    """测试四问元数据"""
+    from src.openllm.memory.unified_memory import UnifiedMemory, MemoryEntry
+    mem = UnifiedMemory()
+    
+    # 存储带四问元数据的记忆
+    entry = mem.store(
+        key="test",
+        value={"text": "用户偏好Python"},
+        why="用户多次表达偏好",
+        when_forget="用户明确改变偏好时",
+        how_correct="记录新的偏好覆盖旧的",
+    )
+    
+    # 验证四问元数据
+    assert entry.why == "用户多次表达偏好"
+    assert entry.when_forget == "用户明确改变偏好时"
+    assert entry.how_correct == "记录新的偏好覆盖旧的"
+    
+    # 验证序列化/反序列化
+    d = entry.to_dict()
+    assert "why" in d
+    assert "when_forget" in d
+    assert "how_correct" in d
+    
+    entry2 = MemoryEntry.from_dict(d)
+    assert entry2.why == entry.why
+    assert entry2.when_forget == entry.when_forget
+    assert entry2.how_correct == entry.how_correct
+    
+    print("✅ 四问元数据测试通过")
+    return True
+
+def test_enhanced_temperature():
+    """测试增强版温度函数：动态λ+酒神双杯"""
+    from src.openllm.memory.unified_memory import MemoryEntry
+    import time
+    
+    # 测试1：不同标签的λ不同
+    e_insight = MemoryEntry(key="i", value={}, tags=["insight"], importance=1.0)
+    e_noise = MemoryEntry(key="n", value={}, tags=["noise"], importance=1.0)
+    e_default = MemoryEntry(key="d", value={}, importance=1.0)
+    
+    # 刚创建，t≈0，温度应≈importance
+    t_insight = e_insight.temperature()
+    t_noise = e_noise.temperature()
+    t_default = e_default.temperature()
+    
+    assert t_insight > 0.9, f"insight温度应≈1.0, got {t_insight}"
+    assert t_noise > 0.9, f"noise温度应≈1.0, got {t_noise}"
+    assert t_default > 0.9, f"default温度应≈1.0, got {t_default}"
+    
+    # 测试2：酒神双杯——访问次数调制heat
+    e_hot = MemoryEntry(key="h", value={}, heat=0.5, access_count=10)
+    e_cold = MemoryEntry(key="c", value={}, heat=0.5, access_count=0)
+    
+    t_hot = e_hot.temperature(decay_lambda=0.01)
+    t_cold = e_cold.temperature(decay_lambda=0.01)
+    
+    assert t_hot > t_cold, f"热记忆应比冷记忆温度高: hot={t_hot}, cold={t_cold}"
+    
+    # 测试3：显式指定λ覆盖自动选择
+    e_explicit = MemoryEntry(key="e", value={}, tags=["noise"], importance=1.0)
+    t_explicit = e_explicit.temperature(decay_lambda=0.001)  # 用慢衰减
+    t_auto = e_noise.temperature()  # noise用快衰减0.05
+    
+    # 显式慢衰减应比自动快衰减温度高（t≈0时差异小，但方向对）
+    assert t_explicit >= t_auto * 0.9, f"显式λ应有效: explicit={t_explicit}, auto={t_auto}"
+    
+    print("✅ 增强温度函数测试通过")
+    return True

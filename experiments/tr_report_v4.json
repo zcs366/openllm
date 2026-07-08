@@ -1,0 +1,229 @@
+{
+  "version": "v4_hybrid",
+  "total_session_pairs": 30,
+  "total_statements": 183,
+  "total_retrieved": 96,
+  "tr_rate": 0.5246,
+  "tr_threshold_23pct": "PASS",
+  "failure_distribution": {
+    "retrieval_noise": 87,
+    "injection_skip": 0,
+    "context_pressure": 0,
+    "model_confusion": 0
+  },
+  "per_session": [
+    {
+      "pair_id": 1,
+      "topic": "REST API版本控制",
+      "stored": 6,
+      "retrieved": 3,
+      "tr": 0.5
+    },
+    {
+      "pair_id": 2,
+      "topic": "PostgreSQL vs MySQL",
+      "stored": 6,
+      "retrieved": 6,
+      "tr": 1.0
+    },
+    {
+      "pair_id": 3,
+      "topic": "微服务拆分策略",
+      "stored": 7,
+      "retrieved": 4,
+      "tr": 0.571
+    },
+    {
+      "pair_id": 4,
+      "topic": "Redis缓存策略",
+      "stored": 6,
+      "retrieved": 3,
+      "tr": 0.5
+    },
+    {
+      "pair_id": 5,
+      "topic": "CI/CD流水线设计",
+      "stored": 7,
+      "retrieved": 3,
+      "tr": 0.429
+    },
+    {
+      "pair_id": 6,
+      "topic": "WebSocket实时通信",
+      "stored": 6,
+      "retrieved": 1,
+      "tr": 0.167
+    },
+    {
+      "pair_id": 7,
+      "topic": "日志系统设计",
+      "stored": 6,
+      "retrieved": 4,
+      "tr": 0.667
+    },
+    {
+      "pair_id": 8,
+      "topic": "容器化部署",
+      "stored": 6,
+      "retrieved": 2,
+      "tr": 0.333
+    },
+    {
+      "pair_id": 9,
+      "topic": "GraphQL vs REST",
+      "stored": 6,
+      "retrieved": 5,
+      "tr": 0.833
+    },
+    {
+      "pair_id": 10,
+      "topic": "分布式锁设计",
+      "stored": 6,
+      "retrieved": 2,
+      "tr": 0.333
+    },
+    {
+      "pair_id": 11,
+      "topic": "Python编码风格",
+      "stored": 7,
+      "retrieved": 0,
+      "tr": 0.0
+    },
+    {
+      "pair_id": 12,
+      "topic": "Git工作流",
+      "stored": 6,
+      "retrieved": 2,
+      "tr": 0.333
+    },
+    {
+      "pair_id": 13,
+      "topic": "IDE选择",
+      "stored": 6,
+      "retrieved": 2,
+      "tr": 0.333
+    },
+    {
+      "pair_id": 14,
+      "topic": "代码审查标准",
+      "stored": 6,
+      "retrieved": 3,
+      "tr": 0.5
+    },
+    {
+      "pair_id": 15,
+      "topic": "测试编写规范",
+      "stored": 6,
+      "retrieved": 5,
+      "tr": 0.833
+    },
+    {
+      "pair_id": 16,
+      "topic": "文档编写习惯",
+      "stored": 6,
+      "retrieved": 1,
+      "tr": 0.167
+    },
+    {
+      "pair_id": 17,
+      "topic": "任务管理工具",
+      "stored": 6,
+      "retrieved": 1,
+      "tr": 0.167
+    },
+    {
+      "pair_id": 18,
+      "topic": "代码重构原则",
+      "stored": 6,
+      "retrieved": 6,
+      "tr": 1.0
+    },
+    {
+      "pair_id": 19,
+      "topic": "错误处理风格",
+      "stored": 6,
+      "retrieved": 5,
+      "tr": 0.833
+    },
+    {
+      "pair_id": 20,
+      "topic": "性能优化优先级",
+      "stored": 6,
+      "retrieved": 2,
+      "tr": 0.333
+    },
+    {
+      "pair_id": 21,
+      "topic": "选择TypeScript",
+      "stored": 6,
+      "retrieved": 4,
+      "tr": 0.667
+    },
+    {
+      "pair_id": 22,
+      "topic": "选择Docker",
+      "stored": 6,
+      "retrieved": 5,
+      "tr": 0.833
+    },
+    {
+      "pair_id": 23,
+      "topic": "选择ElasticSearch",
+      "stored": 6,
+      "retrieved": 5,
+      "tr": 0.833
+    },
+    {
+      "pair_id": 24,
+      "topic": "选择Vue",
+      "stored": 6,
+      "retrieved": 4,
+      "tr": 0.667
+    },
+    {
+      "pair_id": 25,
+      "topic": "选择gRPC",
+      "stored": 6,
+      "retrieved": 3,
+      "tr": 0.5
+    },
+    {
+      "pair_id": 26,
+      "topic": "选择Kafka",
+      "stored": 6,
+      "retrieved": 3,
+      "tr": 0.5
+    },
+    {
+      "pair_id": 27,
+      "topic": "选择Tailwind",
+      "stored": 6,
+      "retrieved": 3,
+      "tr": 0.5
+    },
+    {
+      "pair_id": 28,
+      "topic": "选择Kubernetes",
+      "stored": 6,
+      "retrieved": 2,
+      "tr": 0.333
+    },
+    {
+      "pair_id": 29,
+      "topic": "选择Monorepo",
+      "stored": 6,
+      "retrieved": 6,
+      "tr": 1.0
+    },
+    {
+      "pair_id": 30,
+      "topic": "选择SQLite",
+      "stored": 6,
+      "retrieved": 1,
+      "tr": 0.167
+    }
+  ],
+  "conclusion": "Cross-session transfer EFFECTIVE",
+  "root_cause": "retrieval_noise (87次)",
+  "progression": "v1=21.9% → v2=28.4% → v3=36.1% → v4=52.5%"
+}

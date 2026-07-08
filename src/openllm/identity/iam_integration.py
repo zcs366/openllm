@@ -78,20 +78,17 @@ class IamIntegration:
             return False
         
         try:
-            # 添加到sys.path
-            iam_parent = str(IAM_HARNESS_PATH.parent)
-            if iam_parent not in sys.path:
-                sys.path.insert(0, iam_parent)
-            
-            # 导入模块
-            from iam_harness import (
-                retrieve,
-                format_for_injection,
-                verify,
-                check_conflict,
-                log_decision,
-                get_daily_stats,
-            )
+            import importlib.util as _ilu
+            _spec = _ilu.spec_from_file_location("iam_harness", IAM_HARNESS_PATH.parent / "iam_harness" / "__init__.py")
+            if _spec and _spec.loader:
+                _mod = _ilu.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
+                retrieve = _mod.retrieve
+                format_for_injection = _mod.format_for_injection
+                verify = _mod.verify
+                check_conflict = _mod.check_conflict
+                log_decision = _mod.log_decision
+                get_daily_stats = _mod.get_daily_stats
             
             self._retrieve = retrieve
             self._format_for_injection = format_for_injection

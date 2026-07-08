@@ -87,6 +87,49 @@ class MemoryRecord:
         }
 
 
+def calc_temperature(
+    importance: float,
+    last_accessed: float,
+    heat: float = 0.0,
+    access_count: int = 0,
+    tags: Optional[List[str]] = None,
+    decay_lambda: Optional[float] = None,
+) -> float:
+    """
+    增强温度计算（集成到MemoryBus）。
+    
+    T = importance × e^(-λ_eff × t) + heat × (1 + log(1 + access_count))
+    
+    λ_eff根据tags自动选择：
+    - insight/决策: 0.001（几乎永存）
+    - fact/事实: 0.01（正常衰减）
+    - noise/噪声: 0.05（快速衰减）
+    - habit/习惯: 0.005（慢衰减）
+    - 默认: 0.01
+    """
+    t = time.time() - last_accessed
+    
+    # 动态λ
+    if decay_lambda is None:
+        tag_set = set(tg.lower() for tg in (tags or []))
+        if "insight" in tag_set or "决策" in tag_set:
+            decay_lambda = 0.001
+        elif "fact" in tag_set or "事实" in tag_set:
+            decay_lambda = 0.01
+        elif "noise" in tag_set or "噪声" in tag_set:
+            decay_lambda = 0.05
+        elif "habit" in tag_set or "习惯" in tag_set:
+            decay_lambda = 0.005
+        else:
+            decay_lambda = 0.01
+    
+    # 酒神双杯：访问次数调制heat
+    heat_adj = heat * (1 + math.log(1 + access_count))
+    
+    base = importance * math.exp(-decay_lambda * t)
+    return base + heat_adj
+
+
 @dataclass
 class WriteRequest:
     """统一写入请求"""
@@ -121,6 +164,8 @@ class Query:
     tags: Optional[List[str]] = None
     min_importance: float = 0.0
     min_temperature: float = 0.0
+    use_hybrid: bool = False  # 启用BM25+Embedding混合检索
+    hybrid_weights: tuple = (0.6, 0.4)  # (BM25权重, Embedding权重)
 
 
 # ═══════════════════════════════════════════════
@@ -333,6 +378,48 @@ class MemoryBus:
             except Exception as e:
                 results[name] = {"status": "error", "error": str(e)}
         return results
+
+    def hybrid_rerank(
+        self,
+        records: List[MemoryRecord],
+        query_text: str,
+        bm25_weight: float = 0.6,
+        embed_weight: float = 0.4,
+    ) -> List[MemoryRecord]:
+        """
+        混合重排：BM25关键词匹配 + Embedding语义匹配。
+        
+        Args:
+            records: 初始检索结果（不修改原列表）
+            query_text: 查询文本
+            bm25_weight: BM25权重
+            embed_weight: Embedding权重
+            
+        Returns:
+            新的重排后记录列表
+        """
+        if not records:
+            return records
+        
+        try:
+            from ..retrieval.hybrid import hybrid_score
+            import copy
+            # 创建副本避免修改原记录
+            scored = []
+            for r in records:
+                r_copy = copy.copy(r)
+                r_copy.score = hybrid_score(
+                    query_text, r_copy.content,
+                    bm25_weight=bm25_weight,
+                    embed_weight=embed_weight
+                )
+                scored.append(r_copy)
+            scored.sort(key=lambda r: r.score, reverse=True)
+            return scored
+        except Exception as e:
+            # 任何异常都降级为原始排序
+            logger.debug(f"hybrid_rerank降级: {e}")
+            return records
 
     def get_write_log(self, last_n: int = 20) -> List[WriteResult]:
         """最近N条写入记录（审计用）"""

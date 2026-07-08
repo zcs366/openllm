@@ -43,6 +43,25 @@ from .failure_tracker import (
 # ── 数据模型 ──────────────────────────────────────────
 
 @dataclass
+class RejectionRecord:
+    """拒绝记录——IOS对指令说不的唯一凭证。"""
+    instruction: str
+    reason: str
+    timestamp: float
+    belief_confidence: float  # ISA信念系统对该决策的置信度
+    rejected_by: str = "IOS"  # 拒绝者标识
+
+    def to_dict(self) -> dict:
+        return {
+            "instruction": self.instruction,
+            "reason": self.reason,
+            "timestamp": self.timestamp,
+            "belief_confidence": self.belief_confidence,
+            "rejected_by": self.rejected_by,
+        }
+
+
+@dataclass
 class VerificationResult:
     """治理验证结果"""
     passed: bool
@@ -480,6 +499,29 @@ class GovernanceEngine:
         pattern = re.sub(r'"[^"]{20,}"', '"<LONG_STR>"', pattern)
         return pattern[:200]
     
+    # ── 拒绝接口 ──────────────────────────────────────
+
+    def reject(self, instruction: str, reason: str,
+               belief_confidence: float = 0.0) -> RejectionRecord:
+        """拒绝一个指令。IOS是唯一有权对任何指令说不的体。
+
+        Args:
+            instruction: 被拒绝的指令
+            reason: 拒绝原因
+            belief_confidence: ISA信念系统对该决策的置信度（0~1）
+
+        Returns:
+            RejectionRecord 记录
+        """
+        record = RejectionRecord(
+            instruction=instruction,
+            reason=reason,
+            timestamp=time.time(),
+            belief_confidence=belief_confidence,
+        )
+        logger.warning(f"IOS拒绝: {reason} (instruction={instruction[:80]})")
+        return record
+
     # ── 查询接口 ──────────────────────────────────────
     
     def get_stats(self) -> dict:
@@ -696,78 +738,98 @@ class HeuristicsConsumer:
         self._cache: dict[str, tuple[float, list]] = {}  # path → (mtime, decisions)
     
     def _load_cards(self) -> list[dict]:
-        """加载卡片decisions（带文件级缓存）。"""
-        all_decisions = []
+        """加载卡片（带文件级缓存）。返回完整卡片而非仅decisions。"""
+        all_cards = []
         if not self._cards_dir.exists():
-            return all_decisions
+            return all_cards
         
         for card_file in self._cards_dir.glob("*.json"):
             try:
                 mtime = card_file.stat().st_mtime
                 path_str = str(card_file)
                 
-                # 缓存命中: 文件未修改
                 if path_str in self._cache:
-                    cached_mtime, cached_decs = self._cache[path_str]
+                    cached_mtime, cached_cards = self._cache[path_str]
                     if abs(cached_mtime - mtime) < 0.01:
-                        all_decisions.extend(cached_decs)
+                        all_cards.extend(cached_cards)
                         continue
                 
-                # 缓存未命中: 重新解析
                 with open(card_file) as f:
                     card = json.load(f)
-                decs = [
-                    d for d in card.get("decisions", [])
-                    if isinstance(d, dict)
-                ]
-                self._cache[path_str] = (mtime, decs)
-                all_decisions.extend(decs)
+                if not isinstance(card, dict):
+                    continue
+                self._cache[path_str] = (mtime, [card])
+                all_cards.append(card)
             except (json.JSONDecodeError, KeyError, OSError):
                 continue
         
-        return all_decisions
+        return all_cards
+    
+    def _chinese_overlap(self, text: str, query: str) -> float:
+        """中文字符级重叠匹配。返回0~1的相似度。"""
+        if not text or not query:
+            return 0.0
+        # 提取中文字符集
+        cn_chars = set(c for c in text if '\u4e00' <= c <= '\u9fff')
+        q_chars = set(c for c in query if '\u4e00' <= c <= '\u9fff')
+        if not cn_chars or not q_chars:
+            return 0.0
+        overlap = cn_chars & q_chars
+        return len(overlap) / len(q_chars)
     
     def retrieve(self, task_description: str, top_k: int = 3) -> list[dict]:
         """检索relevant heuristics。
         
-        简易实现: 关键词匹配（trigger_auto.pattern + trigger_semantic + decision.content）
-        未来可升级为embedding检索。
+        三路匹配：关键词(权重3) + 中文字符重叠(权重2) + 英文词重叠(权重1)
         """
         task_lower = task_description.lower()
         candidates = []
         
-        for dec in self._load_cards():
-            trigger = dec.get("trigger", {})
-            content = dec.get("content", "")
+        for card in self._load_cards():
+            score = 0.0
+            topic = card.get("topic", "")
+            keywords = card.get("keywords", [])
+            decisions = card.get("decisions", [])
             
-            # 评分: 关键词重叠
-            score = 0
-            if isinstance(trigger, dict):
-                auto = trigger.get("auto", {})
-                pattern = auto.get("pattern", "") if isinstance(auto, dict) else ""
-                semantic = trigger.get("semantic", "")
-                if pattern and pattern.lower() in task_lower:
-                    score += 3
-                if semantic and isinstance(semantic, str):
-                    words = semantic.lower().split()
-                    score += sum(1 for w in words if w in task_lower)
+            # 路径1: 关键词匹配（权重3）
+            for kw in keywords:
+                if isinstance(kw, str) and kw.lower() in task_lower:
+                    score += 3.0
+                elif isinstance(kw, str):
+                    # 中文关键词字符级匹配
+                    score += self._chinese_overlap(kw, task_description) * 3.0
             
-            if content and isinstance(content, str):
-                words = content.lower().split()
-                score += sum(0.5 for w in words if w in task_lower)
+            # 路径2: topic匹配（权重2）
+            if topic and isinstance(topic, str):
+                score += self._chinese_overlap(topic, task_description) * 2.0
+                # 英文topic
+                if topic.lower() in task_lower:
+                    score += 2.0
+            
+            # 路径3: decisions匹配（权重1）
+            for dec in decisions:
+                content = ""
+                if isinstance(dec, str):
+                    content = dec
+                elif isinstance(dec, dict):
+                    content = dec.get("content", "")
+                if content and isinstance(content, str):
+                    # 中文内容字符级匹配
+                    score += self._chinese_overlap(content, task_description) * 1.0
+                    # 英文内容词匹配
+                    words = content.lower().split()
+                    score += sum(0.5 for w in words if len(w) > 1 and w in task_lower)
             
             if score > 0:
                 candidates.append({
                     "score": score,
-                    "content": content,
-                    "trigger": trigger,
-                    "card": "",
+                    "content": decisions[0] if decisions else "",
+                    "topic": topic,
+                    "keywords": keywords[:5],
                 })
         
-        # 按分数排序，取top_k
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[:top_k]
-    
     def format_for_context(self, heuristics: list[dict]) -> str:
         """格式化为context注入字符串。"""
         if not heuristics:

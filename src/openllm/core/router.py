@@ -117,7 +117,7 @@ class RuleRouter:
         Returns: 4个Phase的决策列表
         """
         if not self.enabled:
-            return self._all_run("路由已禁用")
+            return self.all_run("路由已禁用")
         
         self.stats["total_decisions"] += 1
         decisions = []
@@ -126,7 +126,7 @@ class RuleRouter:
         
         # 规则1: 高风险操作 → 强制全跑
         if self.HIGH_RISK.search(ctx.user_input) or ctx.risk_level in ("high", "critical"):
-            return self._all_run("高风险操作·全阶段激活")
+            return self.all_run("高风险操作·全阶段激活")
         
         # 规则2: 上下文过载 → 最大化跳过
         if ctx.context_used_pct > 0.8:
@@ -165,11 +165,11 @@ class RuleRouter:
         
         # 规则5: 文件操作 → 全跑
         if self.FILE_OPS.search(ctx.user_input):
-            return self._all_run("文件操作·全阶段激活")
+            return self.all_run("文件操作·全阶段激活")
         
         # 规则6: 代码操作 → 全跑
         if self.CODE_OPS.search(ctx.user_input):
-            return self._all_run("代码操作·全阶段激活")
+            return self.all_run("代码操作·全阶段激活")
         
         # 规则7: 搜索/查询 → 跳过OBSERVE的深度分析
         if self.QUERY_OPS.search(ctx.user_input):
@@ -204,9 +204,9 @@ class RuleRouter:
             return decisions
         
         # 默认: 全跑
-        return self._all_run("默认·全阶段激活")
+        return self.all_run("默认·全阶段激活")
     
-    def _all_run(self, reason: str) -> list[RouteDecision]:
+    def all_run(self, reason: str) -> list[RouteDecision]:
         """全部阶段正常执行。"""
         return [
             RouteDecision("PLAN", PhaseAction.RUN, reason),

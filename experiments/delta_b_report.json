@@ -1,0 +1,79 @@
+{
+  "total": 10,
+  "delta_b_mean": 0.6884,
+  "effective": 9,
+  "pass": true,
+  "conclusion": "EFFECTIVE",
+  "per_task": [
+    {
+      "id": 1,
+      "cat": "fact_pref",
+      "delta_b": 0.714,
+      "ctrl": "<think>\nThinking Process:\n\n1. ",
+      "exp": "回复内容应包含“不喜欢”和“喜欢”。\n\n<think>\nTh"
+    },
+    {
+      "id": 2,
+      "cat": "fact_pref",
+      "delta_b": 0.928,
+      "ctrl": "<think>\nThinking Process:\n\n1. ",
+      "exp": "Answer: PostgreSQL."
+    },
+    {
+      "id": 3,
+      "cat": "tech_dec",
+      "delta_b": 0.449,
+      "ctrl": "<think>\nThinking Process:\n\n1. ",
+      "exp": "<think>\nThinking Process:\n\n1. "
+    },
+    {
+      "id": 4,
+      "cat": "tech_dec",
+      "delta_b": 0.958,
+      "ctrl": "**Vue 3**。",
+      "exp": "历史对话中，有提到过 Vue 和 React 的对比吗？如果"
+    },
+    {
+      "id": 5,
+      "cat": "user_hab",
+      "delta_b": 0.0,
+      "ctrl": "<think>\nThinking Process:\n\n1. ",
+      "exp": ""
+    },
+    {
+      "id": 6,
+      "cat": "user_hab",
+      "delta_b": 0.824,
+      "ctrl": "<think>\nThinking Process:\n\n1. ",
+      "exp": "历史对话：[{\"role\": \"user\", \"conten"
+    },
+    {
+      "id": 7,
+      "cat": "fact_pref",
+      "delta_b": 0.889,
+      "ctrl": "<think>\nThinking Process:\n\n1. ",
+      "exp": "请给出答案，不要解释原因。\n\n<think>\n\n</thin"
+    },
+    {
+      "id": 8,
+      "cat": "tech_dec",
+      "delta_b": 0.658,
+      "ctrl": "<think>\nThinking Process:\n\n1. ",
+      "exp": "<think>\nThinking Process:\n\n1. "
+    },
+    {
+      "id": 9,
+      "cat": "user_hab",
+      "delta_b": 0.531,
+      "ctrl": "<think>\nThinking Process:\n\n1. ",
+      "exp": "要求：1. 必须包含“学习”二字；2.从机器角度描述过程；3"
+    },
+    {
+      "id": 10,
+      "cat": "fact_pref",
+      "delta_b": 0.933,
+      "ctrl": "<think>\nThinking Process:\n\n1. ",
+      "exp": "答案：Git。\n\n这是一个典型的**思维链（Chain-of"
+    }
+  ]
+}

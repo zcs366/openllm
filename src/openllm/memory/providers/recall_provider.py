@@ -36,12 +36,12 @@ def _get_recall_append():
     if not _recall_append_loaded:
         _recall_append_loaded = True
         try:
-            # 只在首次调用时添加路径
-            jiak_str = str(JIAK_DIR)
-            if jiak_str not in sys.path:
-                sys.path.insert(0, jiak_str)
-            from recall_append import validate_and_append
-            _recall_append = validate_and_append
+            import importlib.util as _ilu
+            _spec = _ilu.spec_from_file_location("recall_append", JIAK_DIR / "recall_append.py")
+            if _spec and _spec.loader:
+                _mod = _ilu.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
+                _recall_append = _mod.validate_and_append
         except ImportError:
             pass
     return _recall_append

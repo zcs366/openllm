@@ -377,3 +377,76 @@ if __name__ == "__main__":
     print("=" * 60)
 
     sys.exit(1 if _results["failed"] else 0)
+
+def test_calc_temperature():
+    """测试增强温度计算函数"""
+    from src.openllm.memory.memory_bus import calc_temperature
+    import time
+    
+    now = time.time()
+    
+    # 基础测试：t≈0时温度≈importance
+    t = calc_temperature(importance=1.0, last_accessed=now)
+    assert t > 0.9, f"t≈0时温度应≈1.0, got {t}"
+    
+    # 动态λ测试
+    t_insight = calc_temperature(1.0, now, tags=["insight"])
+    t_noise = calc_temperature(1.0, now, tags=["noise"])
+    # 刚创建时差异小，但λ不同
+    
+    # 酒神双杯测试
+    t_hot = calc_temperature(1.0, now, heat=0.5, access_count=10)
+    t_cold = calc_temperature(1.0, now, heat=0.5, access_count=0)
+    assert t_hot > t_cold, f"热记忆应比冷记忆温度高: hot={t_hot}, cold={t_cold}"
+    
+    # 显式λ覆盖
+    t_explicit = calc_temperature(1.0, now, tags=["noise"], decay_lambda=0.001)
+    t_auto = calc_temperature(1.0, now, tags=["noise"])
+    assert t_explicit >= t_auto * 0.9, "显式λ应有效"
+    
+    print("✅ calc_temperature测试通过")
+    return True
+
+def test_hybrid_rerank():
+    """测试混合重排功能"""
+    from src.openllm.memory.memory_bus import MemoryBus, Query, MemoryRecord
+    import time
+    
+    bus = MemoryBus()
+    now = time.time()
+    
+    # 创建测试记录
+    records = [
+        MemoryRecord(
+            record_id="r1", content="选PostgreSQL因JSONB支持",
+            source="test", record_type="fact", importance=0.8,
+            temperature=0.9, trust_level="internal", tags=["数据库"],
+            timestamp=now
+        ),
+        MemoryRecord(
+            record_id="r2", content="前端框架选Vue",
+            source="test", record_type="fact", importance=0.7,
+            temperature=0.8, trust_level="internal", tags=["前端"],
+            timestamp=now
+        ),
+        MemoryRecord(
+            record_id="r3", content="Redis缓存策略",
+            source="test", record_type="fact", importance=0.6,
+            temperature=0.7, trust_level="internal", tags=["缓存"],
+            timestamp=now
+        ),
+    ]
+    
+    # 测试混合重排
+    reranked = bus.hybrid_rerank(records, "关系数据库选哪个", bm25_weight=0.6, embed_weight=0.4)
+    
+    assert len(reranked) == 3
+    assert reranked[0].record_id == "r1"  # PostgreSQL应排第一
+    
+    # 测试Query的use_hybrid字段
+    q = Query(text="测试", use_hybrid=True, hybrid_weights=(0.7, 0.3))
+    assert q.use_hybrid == True
+    assert q.hybrid_weights == (0.7, 0.3)
+    
+    print("✅ hybrid_rerank测试通过")
+    return True

@@ -646,11 +646,13 @@ class IOS:
         # ── P0/P1增强：learn_causal_adapter接入 ──
         if not result.success:
             try:
-                import sys as _sys
-                _isa_dir = str(Path.home() / "projects" / "isa")
-                if _isa_dir not in _sys.path:
-                    _sys.path.insert(0, _isa_dir)
-                from learn_causal_adapter import LearnCausalAdapter
+                import importlib.util as _ilu
+                _isa_path = Path.home() / "projects" / "isa" / "learn_causal_adapter.py"
+                _lca_spec = _ilu.spec_from_file_location("learn_causal_adapter", _isa_path)
+                if _lca_spec and _lca_spec.loader:
+                    _lca_mod = _ilu.module_from_spec(_lca_spec)
+                    _lca_spec.loader.exec_module(_lca_mod)
+                    LearnCausalAdapter = _lca_mod.LearnCausalAdapter
                 adapter = LearnCausalAdapter()
                 adapter.on_failure(
                     action=entry.get("action", ""),
@@ -1336,13 +1338,36 @@ class ISN:
 
 
 class IKO:
-    """可观测"""
+    """IKO — 输出体七因子管线
+    
+    七因子：IntentClassifier, SilenceAuditor, OutputRouter,
+            OutputAuditChain, OutputFeedbackCollector,
+            LambdaCalibrator, ProbingTrainer, SymmetricCodec
+    """
     
     def __init__(self):
         self.metrics: list[TickMetrics] = []
         self.log_path = Path.home() / ".openllm" / "output" / "iko" / "ticks" / "ticks.jsonl"
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        print(f"  IKO 可观测就绪 · 日志={self.log_path}")
+        
+        # 七因子组件初始化
+        from openllm.iko import (
+            IntentClassifier, OutputRouter, SilenceAuditor,
+            OutputAuditChain, OutputFeedbackCollector,
+            LambdaCalibrator, ProbingTrainer, SymmetricCodec,
+        )
+        self.classifier = IntentClassifier()
+        self.router = OutputRouter()
+        self.registry = self.router.registry
+        self.auditor = SilenceAuditor()
+        self.audit_chain = OutputAuditChain()
+        self.feedback_collector = OutputFeedbackCollector()
+        self.calibrator = LambdaCalibrator()
+        self.probing_trainer = ProbingTrainer()
+        self.codec = SymmetricCodec()
+        self._output_count = 0
+        
+        print(f"  IKO 可观测就绪 · 七因子管线 · 日志={self.log_path}")
     
     def trace(self, phase: str, status: str, duration_ms: float = 0.0, detail: str = ""):
         """记录一次观测"""
@@ -1369,6 +1394,45 @@ class IKO:
             "avg_duration_ms": sum(m.duration_ms for m in last_10) / len(last_10),
             "last_phase": last_10[-1].phase if last_10 else "",
         }
+    
+    def process_output(self, raw_output: str, context: dict, decision: dict) -> str:
+        """七因子输出管线"""
+        # 1. 意图分类
+        result = self.classifier.classify(context, decision)
+        intent = result.intent
+        
+        # 2. 沉默审计
+        intent = self.auditor.audit(intent, context, reversible=True)
+        
+        # 3. 路由+渲染
+        plan = self.router.route(intent, content={"text": raw_output}, user_prefs={})
+        renderer = self.registry.get(plan.renderer_name)
+        if renderer:
+            output = renderer.render(intent, {"text": raw_output}, {}, 0.8)
+        else:
+            output = raw_output
+        
+        # 4. 审计链（赫淮斯托斯约束：reasoning_chain_hash必须是真实hash）
+        if output:  # 非空输出才审计
+            import hashlib, json as _json
+            reasoning_hash = hashlib.sha256(
+                _json.dumps({"intent": intent.value, "output": output[:200]}, sort_keys=True).encode()
+            ).hexdigest()[:16]
+            self.audit_chain.append(
+                output_id=f"out-{self._output_count}",
+                intent=intent.value,
+                content=output.encode(),
+                decision_source="IKO",
+                risk_level=0.1,
+                confidence=0.8,
+                reasoning_chain_hash=reasoning_hash,
+            )
+            self._output_count += 1
+        
+        # 5. 记录trace
+        self.trace("output_process", "ok", detail=f"intent={intent.value}")
+        
+        return output
     
     def shutdown(self):
         """关闭时的报告"""
@@ -1710,8 +1774,28 @@ class Agent:
                 self._last_output = result.output
             else:
                 self._last_output = proposal.content if proposal.content else result.output
-            if self.isa.mode != "silent":
-                self.isa.respond(result.output)
+            
+            # IKO七因子管线
+            try:
+                risk_map = {"low": "LOW", "medium": "MEDIUM", "high": "HIGH"}
+                ctx_for_iko = {
+                    "risk_level": risk_map.get(getattr(decision, 'risk_level', 'low'), "LOW"),
+                    "has_tool_calls": bool(getattr(decision, 'tool_calls', None)),
+                    # 包拯审计修正：has_side_effects应检查实际副作用，非仅输出存在
+                    "has_side_effects": bool(getattr(result, 'success', False) and getattr(result, 'output', '')),
+                    # 包拯审计修正：option_count从proposal选项中提取，非硬编码
+                    "option_count": max(1, len(getattr(proposal, 'evidence', []))),
+                }
+                decision_dict = {"type": "execute", "content": result.output}
+                processed = self.iko.process_output(result.output, ctx_for_iko, decision_dict)
+                if self.isa.mode != "silent" and processed:
+                    self.isa.respond(processed)
+            except Exception as e:
+                # 包拯审计修正：降级时必须记录trace，不能静默吞没
+                self.iko.trace("output_process", "error", detail=str(e)[:100])
+                # 管线失败降级为原始输出
+                if self.isa.mode != "silent":
+                    self.isa.respond(result.output)
             
             turn.add_action("execute", result.output[:100])
             turn.complete()

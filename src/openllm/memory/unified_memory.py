@@ -55,7 +55,7 @@ CAPSULE_DIR = MEMORY_HOME / "capsules"
 
 @dataclass
 class MemoryEntry:
-    """记忆条目"""
+    """记忆条目（四问元数据版）"""
     key: str
     value: Dict[str, Any]
     importance: float = 0.5  # 重要性 (0.0-1.0)
@@ -67,23 +67,53 @@ class MemoryEntry:
     layer: str = "warm"      # 记忆层 (hot/warm/cold)
     tags: List[str] = field(default_factory=list)
     
+    # 四问元数据
+    why: str = ""              # 为什么这条记忆重要
+    when_forget: str = ""      # 什么时候应该遗忘
+    how_correct: str = ""      # 记错了怎么修正
+    
     @property
     def is_expired(self) -> bool:
         """是否过期"""
         return time.time() - self.created_at > self.ttl
     
-    def temperature(self, decay_lambda: float = 0.01) -> float:
+    def temperature(self, decay_lambda: Optional[float] = None) -> float:
         """
-        计算记忆温度。
+        计算记忆温度（增强版）。
         
-        T = imp × e^(-λt) + heat
+        T = imp × e^(-λ_eff × t) + heat_adj
+        
+        λ_eff = λ_base × type_factor
+        heat_adj = heat × (1 + log(1 + access_count))
         
         Args:
-            decay_lambda: 衰减系数
+            decay_lambda: 衰减系数（None=自动根据标签选择）
         """
         t = time.time() - self.last_accessed
+        
+        # 动态λ：根据标签选择基础衰减系数
+        if decay_lambda is None:
+            decay_lambda = self._get_lambda_by_tags()
+        
+        # 酒神双杯：访问次数调制heat
+        heat_adj = self.heat * (1 + math.log(1 + self.access_count))
+        
         base = self.importance * math.exp(-decay_lambda * t)
-        return base + self.heat
+        return base + heat_adj
+    
+    def _get_lambda_by_tags(self) -> float:
+        """根据标签选择λ：insight慢衰减，noise快衰减"""
+        tag_set = set(t.lower() for t in self.tags)
+        if "insight" in tag_set or "决策" in tag_set:
+            return 0.001  # 洞察/决策：几乎永存
+        elif "fact" in tag_set or "事实" in tag_set:
+            return 0.01   # 事实：正常衰减
+        elif "noise" in tag_set or "噪声" in tag_set:
+            return 0.05   # 噪声：快速衰减
+        elif "habit" in tag_set or "习惯" in tag_set:
+            return 0.005  # 习惯：慢衰减
+        else:
+            return 0.01   # 默认：正常衰减
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -98,6 +128,9 @@ class MemoryEntry:
             "ttl": self.ttl,
             "layer": self.layer,
             "tags": self.tags,
+            "why": self.why,
+            "when_forget": self.when_forget,
+            "how_correct": self.how_correct,
         }
     
     @classmethod
@@ -166,6 +199,9 @@ class UnifiedMemory:
         layer: str = "warm",
         tags: List[str] = None,
         ttl: int = 86400,
+        why: str = "",
+        when_forget: str = "",
+        how_correct: str = "",
     ) -> MemoryEntry:
         """
         存储记忆。
@@ -177,6 +213,9 @@ class UnifiedMemory:
             layer: 记忆层 (hot/warm/cold)
             tags: 标签列表
             ttl: 生存时间（秒）
+            why: 为什么这条记忆重要
+            when_forget: 什么时候应该遗忘
+            how_correct: 记错了怎么修正
             
         Returns:
             MemoryEntry: 记忆条目
@@ -188,6 +227,9 @@ class UnifiedMemory:
             layer=layer,
             tags=tags or [],
             ttl=ttl,
+            why=why,
+            when_forget=when_forget,
+            how_correct=how_correct,
         )
         
         # 根据层选择缓存和目录
