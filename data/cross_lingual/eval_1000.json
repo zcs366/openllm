@@ -1,0 +1,502 @@
+[
+  {
+    "en": "The study investigates methodology using analysis.",
+    "zh": "该研究使用方法论调查分析。",
+    "domain": "academic"
+  },
+  {
+    "en": "Citations support the arguments.",
+    "zh": "引用支持论点。",
+    "domain": "academic"
+  },
+  {
+    "en": "Modern AI enables efficient AI.",
+    "zh": "现代人工智能支持高效的人工智能。",
+    "domain": "tech"
+  },
+  {
+    "en": "She enjoys exercise during reading.",
+    "zh": "她喜欢在锻炼期间阅读。",
+    "domain": "daily"
+  },
+  {
+    "en": "He learned to play guitar.",
+    "zh": "他学会了弹吉他。",
+    "domain": "daily"
+  },
+  {
+    "en": "He practiced travel every travel.",
+    "zh": "他每天旅行练习旅行。",
+    "domain": "daily"
+  },
+  {
+    "en": "The music was great for music.",
+    "zh": "这个音乐对音乐来说很棒。",
+    "domain": "daily"
+  },
+  {
+    "en": "The system uses algorithms to optimize AI.",
+    "zh": "该系统使用算法来优化人工智能。",
+    "domain": "tech"
+  },
+  {
+    "en": "She enjoys music during travel.",
+    "zh": "她喜欢在音乐期间旅行。",
+    "domain": "daily"
+  },
+  {
+    "en": "The startup raised venture capital.",
+    "zh": "初创公司获得了风险投资。",
+    "domain": "business"
+  },
+  {
+    "en": "Research on climate shows climate.",
+    "zh": "关于气候的研究表明气候。",
+    "domain": "science"
+  },
+  {
+    "en": "Studies confirm that genetics affects physics.",
+    "zh": "研究证实遗传学影响物理学。",
+    "domain": "science"
+  },
+  {
+    "en": "The paper examines framework through methodology.",
+    "zh": "本文通过框架研究方法论。",
+    "domain": "academic"
+  },
+  {
+    "en": "He practiced exercise every cooking.",
+    "zh": "他每天锻炼练习烹饪。",
+    "domain": "daily"
+  },
+  {
+    "en": "Competitive advantage sustains growth.",
+    "zh": "竞争优势维持增长。",
+    "domain": "business"
+  },
+  {
+    "en": "Modern algorithms enables efficient AI.",
+    "zh": "现代算法支持高效的人工智能。",
+    "domain": "tech"
+  },
+  {
+    "en": "The study investigates methodology using analysis.",
+    "zh": "该研究使用方法论调查分析。",
+    "domain": "academic"
+  },
+  {
+    "en": "Research on biology shows biology.",
+    "zh": "关于生物学的研究表明生物学。",
+    "domain": "science"
+  },
+  {
+    "en": "The framework supports algorithms and cloud infrastructure.",
+    "zh": "该框架支持算法和云基础设施。",
+    "domain": "tech"
+  },
+  {
+    "en": "Modern software development enables efficient software development.",
+    "zh": "现代软件开发支持高效的软件开发。",
+    "domain": "tech"
+  },
+  {
+    "en": "The study investigates evidence using theory.",
+    "zh": "该研究使用证据调查理论。",
+    "domain": "academic"
+  },
+  {
+    "en": "The discovery of climate impacts climate.",
+    "zh": "气候的发现影响气候。",
+    "domain": "science"
+  },
+  {
+    "en": "The framework supports algorithms and data processing.",
+    "zh": "该框架支持算法和数据处理。",
+    "domain": "tech"
+  },
+  {
+    "en": "Studies confirm that genetics affects genetics.",
+    "zh": "研究证实遗传学影响遗传学。",
+    "domain": "science"
+  },
+  {
+    "en": "The restaurant serves good food.",
+    "zh": "这家餐厅的食物很好。",
+    "domain": "daily"
+  },
+  {
+    "en": "Modern software development enables efficient data processing.",
+    "zh": "现代软件开发支持高效的数据处理。",
+    "domain": "tech"
+  },
+  {
+    "en": "Studies confirm that climate affects biology.",
+    "zh": "研究证实气候影响生物学。",
+    "domain": "science"
+  },
+  {
+    "en": "The study investigates methodology using analysis.",
+    "zh": "该研究使用方法论调查分析。",
+    "domain": "academic"
+  },
+  {
+    "en": "The literature review covers recent work.",
+    "zh": "文献综述涵盖了近期工作。",
+    "domain": "academic"
+  },
+  {
+    "en": "The framework supports data processing and AI.",
+    "zh": "该框架支持数据处理和人工智能。",
+    "domain": "tech"
+  },
+  {
+    "en": "The discovery of climate impacts physics.",
+    "zh": "气候的发现影响物理学。",
+    "domain": "science"
+  },
+  {
+    "en": "Market trends indicate growth in innovation.",
+    "zh": "市场趋势显示增长在创新方面。",
+    "domain": "business"
+  },
+  {
+    "en": "Research on physics shows evolution.",
+    "zh": "关于物理学的研究表明进化。",
+    "domain": "science"
+  },
+  {
+    "en": "The exercise was great for exercise.",
+    "zh": "这个锻炼对锻炼来说很棒。",
+    "domain": "daily"
+  },
+  {
+    "en": "Generative models create new content.",
+    "zh": "生成模型创造新内容。",
+    "domain": "tech"
+  },
+  {
+    "en": "The children played in the garden.",
+    "zh": "孩子们在花园里玩耍。",
+    "domain": "daily"
+  },
+  {
+    "en": "Modern data processing enables efficient data processing.",
+    "zh": "现代数据处理支持高效的数据处理。",
+    "domain": "tech"
+  },
+  {
+    "en": "The discovery of evolution impacts evolution.",
+    "zh": "进化的发现影响进化。",
+    "domain": "science"
+  },
+  {
+    "en": "The system uses cloud infrastructure to optimize software development.",
+    "zh": "该系统使用云基础设施来优化软件开发。",
+    "domain": "tech"
+  },
+  {
+    "en": "The system uses software development to optimize software development.",
+    "zh": "该系统使用软件开发来优化软件开发。",
+    "domain": "tech"
+  },
+  {
+    "en": "Human resources manages talent.",
+    "zh": "人力资源管理人才。",
+    "domain": "business"
+  },
+  {
+    "en": "The study investigates theory using evidence.",
+    "zh": "该研究使用理论调查证据。",
+    "domain": "academic"
+  },
+  {
+    "en": "Market trends indicate innovation in strategy.",
+    "zh": "市场趋势显示创新在战略方面。",
+    "domain": "business"
+  },
+  {
+    "en": "Investment in innovation drives strategy.",
+    "zh": "对创新的投资推动战略。",
+    "domain": "business"
+  },
+  {
+    "en": "She enjoys music during music.",
+    "zh": "她喜欢在音乐期间音乐。",
+    "domain": "daily"
+  },
+  {
+    "en": "Modern algorithms enables efficient cloud infrastructure.",
+    "zh": "现代算法支持高效的云基础设施。",
+    "domain": "tech"
+  },
+  {
+    "en": "The paper examines evidence through analysis.",
+    "zh": "本文通过证据研究分析。",
+    "domain": "academic"
+  },
+  {
+    "en": "The paper examines framework through evidence.",
+    "zh": "本文通过框架研究证据。",
+    "domain": "academic"
+  },
+  {
+    "en": "Investment in management drives strategy.",
+    "zh": "对管理的投资推动战略。",
+    "domain": "business"
+  },
+  {
+    "en": "The system uses AI to optimize cloud infrastructure.",
+    "zh": "该系统使用人工智能来优化云基础设施。",
+    "domain": "tech"
+  },
+  {
+    "en": "Research on climate shows genetics.",
+    "zh": "关于气候的研究表明遗传学。",
+    "domain": "science"
+  },
+  {
+    "en": "Studies confirm that evolution affects biology.",
+    "zh": "研究证实进化影响生物学。",
+    "domain": "science"
+  },
+  {
+    "en": "Modern data processing enables efficient cloud infrastructure.",
+    "zh": "现代数据处理支持高效的云基础设施。",
+    "domain": "tech"
+  },
+  {
+    "en": "The study investigates framework using evidence.",
+    "zh": "该研究使用框架调查证据。",
+    "domain": "academic"
+  },
+  {
+    "en": "Studies confirm that climate affects evolution.",
+    "zh": "研究证实气候影响进化。",
+    "domain": "science"
+  },
+  {
+    "en": "The cooking was great for exercise.",
+    "zh": "这个烹饪对锻炼来说很棒。",
+    "domain": "daily"
+  },
+  {
+    "en": "The exercise was great for travel.",
+    "zh": "这个锻炼对旅行来说很棒。",
+    "domain": "daily"
+  },
+  {
+    "en": "Market trends indicate strategy in management.",
+    "zh": "市场趋势显示战略在管理方面。",
+    "domain": "business"
+  },
+  {
+    "en": "Geology studies Earth's structure.",
+    "zh": "地质学研究地球结构。",
+    "domain": "science"
+  },
+  {
+    "en": "Analysis of evidence reveals analysis.",
+    "zh": "对证据的分析揭示分析。",
+    "domain": "academic"
+  },
+  {
+    "en": "She enjoys music during exercise.",
+    "zh": "她喜欢在音乐期间锻炼。",
+    "domain": "daily"
+  },
+  {
+    "en": "She enjoys cooking during reading.",
+    "zh": "她喜欢在烹饪期间阅读。",
+    "domain": "daily"
+  },
+  {
+    "en": "Analysis of evidence reveals analysis.",
+    "zh": "对证据的分析揭示分析。",
+    "domain": "academic"
+  },
+  {
+    "en": "The system uses AI to optimize algorithms.",
+    "zh": "该系统使用人工智能来优化算法。",
+    "domain": "tech"
+  },
+  {
+    "en": "Customer experience builds brand loyalty.",
+    "zh": "客户体验建立品牌忠诚。",
+    "domain": "business"
+  },
+  {
+    "en": "The park is beautiful in spring.",
+    "zh": "公园在春天很美。",
+    "domain": "daily"
+  },
+  {
+    "en": "Research on physics shows genetics.",
+    "zh": "关于物理学的研究表明遗传学。",
+    "domain": "science"
+  },
+  {
+    "en": "The discovery of genetics impacts physics.",
+    "zh": "遗传学的发现影响物理学。",
+    "domain": "science"
+  },
+  {
+    "en": "Methodology must be transparent.",
+    "zh": "方法论必须透明。",
+    "domain": "academic"
+  },
+  {
+    "en": "Studies confirm that evolution affects climate.",
+    "zh": "研究证实进化影响气候。",
+    "domain": "science"
+  },
+  {
+    "en": "Modern data processing enables efficient data processing.",
+    "zh": "现代数据处理支持高效的数据处理。",
+    "domain": "tech"
+  },
+  {
+    "en": "Market trends indicate strategy in strategy.",
+    "zh": "市场趋势显示战略在战略方面。",
+    "domain": "business"
+  },
+  {
+    "en": "She enjoys exercise during reading.",
+    "zh": "她喜欢在锻炼期间阅读。",
+    "domain": "daily"
+  },
+  {
+    "en": "He practiced music every travel.",
+    "zh": "他每天音乐练习旅行。",
+    "domain": "daily"
+  },
+  {
+    "en": "Modern cloud infrastructure enables efficient cloud infrastructure.",
+    "zh": "现代云基础设施支持高效的云基础设施。",
+    "domain": "tech"
+  },
+  {
+    "en": "She enjoys exercise during exercise.",
+    "zh": "她喜欢在锻炼期间锻炼。",
+    "domain": "daily"
+  },
+  {
+    "en": "The paper examines framework through framework.",
+    "zh": "本文通过框架研究框架。",
+    "domain": "academic"
+  },
+  {
+    "en": "The company focuses on management and growth.",
+    "zh": "该公司专注于管理和增长。",
+    "domain": "business"
+  },
+  {
+    "en": "The system uses cloud infrastructure to optimize algorithms.",
+    "zh": "该系统使用云基础设施来优化算法。",
+    "domain": "tech"
+  },
+  {
+    "en": "Analysis of methodology reveals evidence.",
+    "zh": "对方法论的分析揭示证据。",
+    "domain": "academic"
+  },
+  {
+    "en": "Investment in strategy drives strategy.",
+    "zh": "对战略的投资推动战略。",
+    "domain": "business"
+  },
+  {
+    "en": "Analysis of framework reveals evidence.",
+    "zh": "对框架的分析揭示证据。",
+    "domain": "academic"
+  },
+  {
+    "en": "The framework supports AI and AI.",
+    "zh": "该框架支持人工智能和人工智能。",
+    "domain": "tech"
+  },
+  {
+    "en": "The system uses AI to optimize cloud infrastructure.",
+    "zh": "该系统使用人工智能来优化云基础设施。",
+    "domain": "tech"
+  },
+  {
+    "en": "She enjoys cooking during travel.",
+    "zh": "她喜欢在烹饪期间旅行。",
+    "domain": "daily"
+  },
+  {
+    "en": "Modern cloud infrastructure enables efficient software development.",
+    "zh": "现代云基础设施支持高效的软件开发。",
+    "domain": "tech"
+  },
+  {
+    "en": "She enjoys reading during travel.",
+    "zh": "她喜欢在阅读期间旅行。",
+    "domain": "daily"
+  },
+  {
+    "en": "The movie received good reviews.",
+    "zh": "电影获得了好评。",
+    "domain": "daily"
+  },
+  {
+    "en": "The study investigates methodology using methodology.",
+    "zh": "该研究使用方法论调查方法论。",
+    "domain": "academic"
+  },
+  {
+    "en": "He practiced reading every cooking.",
+    "zh": "他每天阅读练习烹饪。",
+    "domain": "daily"
+  },
+  {
+    "en": "Analysis of framework reveals theory.",
+    "zh": "对框架的分析揭示理论。",
+    "domain": "academic"
+  },
+  {
+    "en": "Research on genetics shows evolution.",
+    "zh": "关于遗传学的研究表明进化。",
+    "domain": "science"
+  },
+  {
+    "en": "The framework supports data processing and cloud infrastructure.",
+    "zh": "该框架支持数据处理和云基础设施。",
+    "domain": "tech"
+  },
+  {
+    "en": "She enjoys reading during cooking.",
+    "zh": "她喜欢在阅读期间烹饪。",
+    "domain": "daily"
+  },
+  {
+    "en": "Analysis of evidence reveals evidence.",
+    "zh": "对证据的分析揭示证据。",
+    "domain": "academic"
+  },
+  {
+    "en": "The framework supports software development and AI.",
+    "zh": "该框架支持软件开发和人工智能。",
+    "domain": "tech"
+  },
+  {
+    "en": "APIs connect different software systems.",
+    "zh": "API连接不同软件系统。",
+    "domain": "tech"
+  },
+  {
+    "en": "Market trends indicate management in efficiency.",
+    "zh": "市场趋势显示管理在效率方面。",
+    "domain": "business"
+  },
+  {
+    "en": "Analysis of methodology reveals theory.",
+    "zh": "对方法论的分析揭示理论。",
+    "domain": "academic"
+  },
+  {
+    "en": "The system uses algorithms to optimize algorithms.",
+    "zh": "该系统使用算法来优化算法。",
+    "domain": "tech"
+  }
+]

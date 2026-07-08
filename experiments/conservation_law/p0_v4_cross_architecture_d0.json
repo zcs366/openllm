@@ -1,0 +1,307 @@
+{
+  "config": {
+    "calibration_size": 100
+  },
+  "results": [
+    {
+      "name": "GPT-2 (decoder)",
+      "architecture": "decoder",
+      "num_layers": 12,
+      "hidden_dim": 768,
+      "d0_mean": 118.0,
+      "d0_std": 31.09126351029605,
+      "d0_cv": 0.26348528398555976,
+      "d0_min": 32,
+      "d0_max": 145,
+      "layers": {
+        "0": {
+          "d0": 95,
+          "eff_dims": 16,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        },
+        "1": {
+          "d0": 96,
+          "eff_dims": 17,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        },
+        "2": {
+          "d0": 95,
+          "eff_dims": 18,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        },
+        "3": {
+          "d0": 108,
+          "eff_dims": 23,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        },
+        "4": {
+          "d0": 118,
+          "eff_dims": 23,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        },
+        "5": {
+          "d0": 128,
+          "eff_dims": 24,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        },
+        "6": {
+          "d0": 132,
+          "eff_dims": 24,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        },
+        "7": {
+          "d0": 136,
+          "eff_dims": 24,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        },
+        "8": {
+          "d0": 139,
+          "eff_dims": 24,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        },
+        "9": {
+          "d0": 143,
+          "eff_dims": 23,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        },
+        "10": {
+          "d0": 145,
+          "eff_dims": 21,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        },
+        "11": {
+          "d0": 144,
+          "eff_dims": 19,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        },
+        "12": {
+          "d0": 32,
+          "eff_dims": 8,
+          "total_tokens": 1361,
+          "hidden_dim": 768
+        }
+      },
+      "elapsed": 97.84542775154114
+    },
+    {
+      "name": "BERT-base (encoder)",
+      "architecture": "encoder",
+      "num_layers": 12,
+      "hidden_dim": 768,
+      "d0_mean": 158.58333333333334,
+      "d0_std": 23.514032453456856,
+      "d0_cv": 0.14827555934917616,
+      "d0_min": 122,
+      "d0_max": 196,
+      "layers": {
+        "0": {
+          "d0": 108,
+          "eff_dims": 22,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        },
+        "1": {
+          "d0": 122,
+          "eff_dims": 22,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        },
+        "2": {
+          "d0": 128,
+          "eff_dims": 24,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        },
+        "3": {
+          "d0": 132,
+          "eff_dims": 22,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        },
+        "4": {
+          "d0": 139,
+          "eff_dims": 22,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        },
+        "5": {
+          "d0": 148,
+          "eff_dims": 20,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        },
+        "6": {
+          "d0": 156,
+          "eff_dims": 20,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        },
+        "7": {
+          "d0": 168,
+          "eff_dims": 21,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        },
+        "8": {
+          "d0": 172,
+          "eff_dims": 20,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        },
+        "9": {
+          "d0": 177,
+          "eff_dims": 19,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        },
+        "10": {
+          "d0": 182,
+          "eff_dims": 19,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        },
+        "11": {
+          "d0": 183,
+          "eff_dims": 17,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        },
+        "12": {
+          "d0": 196,
+          "eff_dims": 19,
+          "total_tokens": 1614,
+          "hidden_dim": 768
+        }
+      },
+      "elapsed": 97.9455053806305
+    },
+    {
+      "name": "Llama-3.2-1B (decoder)",
+      "architecture": "decoder",
+      "num_layers": 16,
+      "hidden_dim": 2048,
+      "d0_mean": 185.125,
+      "d0_std": 22.673980131419363,
+      "d0_cv": 0.1224792984816711,
+      "d0_min": 124,
+      "d0_max": 201,
+      "layers": {
+        "0": {
+          "d0": 105,
+          "eff_dims": 19,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "1": {
+          "d0": 124,
+          "eff_dims": 21,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "2": {
+          "d0": 147,
+          "eff_dims": 19,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "3": {
+          "d0": 158,
+          "eff_dims": 19,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "4": {
+          "d0": 197,
+          "eff_dims": 20,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "5": {
+          "d0": 201,
+          "eff_dims": 18,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "6": {
+          "d0": 201,
+          "eff_dims": 18,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "7": {
+          "d0": 201,
+          "eff_dims": 18,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "8": {
+          "d0": 201,
+          "eff_dims": 19,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "9": {
+          "d0": 201,
+          "eff_dims": 19,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "10": {
+          "d0": 186,
+          "eff_dims": 19,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "11": {
+          "d0": 176,
+          "eff_dims": 20,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "12": {
+          "d0": 178,
+          "eff_dims": 19,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "13": {
+          "d0": 188,
+          "eff_dims": 19,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "14": {
+          "d0": 201,
+          "eff_dims": 19,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "15": {
+          "d0": 201,
+          "eff_dims": 18,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        },
+        "16": {
+          "d0": 201,
+          "eff_dims": 14,
+          "total_tokens": 1456,
+          "hidden_dim": 2048
+        }
+      },
+      "elapsed": 288.1845097541809
+    }
+  ]
+}

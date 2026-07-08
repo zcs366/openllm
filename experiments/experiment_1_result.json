@@ -1,0 +1,15 @@
+{
+  "experiment": "principle-a priori-derivation",
+  "timestamp": 1783389298.946187,
+  "similarities": {
+    "rejection": 0.6833333333333333,
+    "provenance": 0.22916666666666666
+  },
+  "average_similarity": 0.45625,
+  "verdict": "中间地带——原则部分可推导，需要混合路线",
+  "recommended_route": "P1-AB",
+  "thresholds": {
+    "high": 0.7,
+    "low": 0.4
+  }
+}

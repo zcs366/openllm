@@ -1,0 +1,452 @@
+[
+  {
+    "en": "Customer feedback improves services.",
+    "zh": "客户反馈改进服务。",
+    "domain": "business"
+  },
+  {
+    "en": "Renewable energy reduces carbon emissions.",
+    "zh": "可再生能源减少碳排放。",
+    "domain": "science"
+  },
+  {
+    "en": "Cloud computing enables scalable services.",
+    "zh": "云计算支持可扩展服务。",
+    "domain": "tech"
+  },
+  {
+    "en": "Generative models create new content.",
+    "zh": "生成模型创造新内容。",
+    "domain": "tech"
+  },
+  {
+    "en": "I enjoy reading books.",
+    "zh": "我喜欢读书。",
+    "domain": "daily"
+  },
+  {
+    "en": "Scientific methodology ensures reproducibility.",
+    "zh": "科学方法确保可重复性。",
+    "domain": "science"
+  },
+  {
+    "en": "The new drug shows promising results.",
+    "zh": "新药显示出有希望的结果。",
+    "domain": "science"
+  },
+  {
+    "en": "Meteorology predicts weather patterns.",
+    "zh": "气象学预测天气模式。",
+    "domain": "science"
+  },
+  {
+    "en": "Biodiversity is declining worldwide.",
+    "zh": "全球生物多样性正在下降。",
+    "domain": "science"
+  },
+  {
+    "en": "Data analytics informs business decisions.",
+    "zh": "数据分析为商业决策提供信息。",
+    "domain": "business"
+  },
+  {
+    "en": "The abstract provides a brief overview.",
+    "zh": "摘要提供了简要概述。",
+    "domain": "academic"
+  },
+  {
+    "en": "He cooks dinner every night.",
+    "zh": "他每晚做晚饭。",
+    "domain": "daily"
+  },
+  {
+    "en": "He learned to play guitar.",
+    "zh": "他学会了弹吉他。",
+    "domain": "daily"
+  },
+  {
+    "en": "Customer experience builds brand loyalty.",
+    "zh": "客户体验建立品牌忠诚。",
+    "domain": "business"
+  },
+  {
+    "en": "Digital transformation reshapes industries.",
+    "zh": "数字化转型重塑行业。",
+    "domain": "business"
+  },
+  {
+    "en": "The transformer model uses self-attention.",
+    "zh": "Transformer模型使用自注意力机制。",
+    "domain": "tech"
+  },
+  {
+    "en": "She travels to different countries.",
+    "zh": "她去不同国家旅行。",
+    "domain": "daily"
+  },
+  {
+    "en": "They visited their grandparents.",
+    "zh": "他们看望了祖父母。",
+    "domain": "daily"
+  },
+  {
+    "en": "Chemistry studies matter and its changes.",
+    "zh": "化学研究物质及其变化。",
+    "domain": "science"
+  },
+  {
+    "en": "Neural networks process information in layers.",
+    "zh": "神经网络分层处理信息。",
+    "domain": "tech"
+  },
+  {
+    "en": "Management practices improve productivity.",
+    "zh": "管理实践提高生产力。",
+    "domain": "business"
+  },
+  {
+    "en": "The model predicts outcomes accurately.",
+    "zh": "模型准确预测结果。",
+    "domain": "academic"
+  },
+  {
+    "en": "Machine learning requires large datasets.",
+    "zh": "机器学习需要大量数据集。",
+    "domain": "tech"
+  },
+  {
+    "en": "International trade connects economies.",
+    "zh": "国际贸易连接经济。",
+    "domain": "business"
+  },
+  {
+    "en": "The conclusion summarizes key findings.",
+    "zh": "结论总结了主要发现。",
+    "domain": "academic"
+  },
+  {
+    "en": "Validation confirms the approach.",
+    "zh": "验证确认了方法。",
+    "domain": "academic"
+  },
+  {
+    "en": "Deep learning has transformed AI research.",
+    "zh": "深度学习改变了人工智能研究。",
+    "domain": "tech"
+  },
+  {
+    "en": "Peer review ensures research quality.",
+    "zh": "同行评审确保研究质量。",
+    "domain": "academic"
+  },
+  {
+    "en": "IoT connects everyday devices.",
+    "zh": "物联网连接日常设备。",
+    "domain": "tech"
+  },
+  {
+    "en": "Oceanography studies marine environments.",
+    "zh": "海洋学研究海洋环境。",
+    "domain": "science"
+  },
+  {
+    "en": "Paleontology examines ancient life.",
+    "zh": "古生物学研究古代生命。",
+    "domain": "science"
+  },
+  {
+    "en": "The weather is nice today.",
+    "zh": "今天天气很好。",
+    "domain": "daily"
+  },
+  {
+    "en": "Financial markets respond to economic data.",
+    "zh": "金融市场响应经济数据。",
+    "domain": "business"
+  },
+  {
+    "en": "Research teams publish in top journals.",
+    "zh": "研究团队在顶级期刊发表。",
+    "domain": "science"
+  },
+  {
+    "en": "Blockchain ensures data integrity.",
+    "zh": "区块链确保数据完整性。",
+    "domain": "tech"
+  },
+  {
+    "en": "Reinforcement learning optimizes decisions.",
+    "zh": "强化学习优化决策。",
+    "domain": "tech"
+  },
+  {
+    "en": "Virology studies viruses.",
+    "zh": "病毒学研究病毒。",
+    "domain": "science"
+  },
+  {
+    "en": "The library has many books.",
+    "zh": "图书馆有很多书。",
+    "domain": "daily"
+  },
+  {
+    "en": "Methodology must be transparent.",
+    "zh": "方法论必须透明。",
+    "domain": "academic"
+  },
+  {
+    "en": "The framework enables systematic analysis.",
+    "zh": "框架支持系统分析。",
+    "domain": "academic"
+  },
+  {
+    "en": "He drove to work today.",
+    "zh": "他今天开车上班。",
+    "domain": "daily"
+  },
+  {
+    "en": "The thesis presents a novel approach.",
+    "zh": "论文提出了一种新方法。",
+    "domain": "academic"
+  },
+  {
+    "en": "5G networks enable faster communication.",
+    "zh": "5G网络实现更快通信。",
+    "domain": "tech"
+  },
+  {
+    "en": "The movie received good reviews.",
+    "zh": "电影获得了好评。",
+    "domain": "daily"
+  },
+  {
+    "en": "Physics explores fundamental forces.",
+    "zh": "物理学探索基本力。",
+    "domain": "science"
+  },
+  {
+    "en": "Natural language processing understands text.",
+    "zh": "自然语言处理理解文本。",
+    "domain": "tech"
+  },
+  {
+    "en": "The theory explains observed phenomena.",
+    "zh": "理论解释观察到的现象。",
+    "domain": "academic"
+  },
+  {
+    "en": "The discussion interprets the results.",
+    "zh": "讨论解读了结果。",
+    "domain": "academic"
+  },
+  {
+    "en": "Brand identity differentiates products.",
+    "zh": "品牌识别区分产品。",
+    "domain": "business"
+  },
+  {
+    "en": "Climate change affects global ecosystems.",
+    "zh": "气候变化影响全球生态系统。",
+    "domain": "science"
+  },
+  {
+    "en": "The startup raised venture capital.",
+    "zh": "初创公司获得了风险投资。",
+    "domain": "business"
+  },
+  {
+    "en": "The concert was amazing.",
+    "zh": "音乐会非常精彩。",
+    "domain": "daily"
+  },
+  {
+    "en": "The dog chased the ball.",
+    "zh": "狗追着球跑。",
+    "domain": "daily"
+  },
+  {
+    "en": "She painted a beautiful picture.",
+    "zh": "她画了一幅美丽的画。",
+    "domain": "daily"
+  },
+  {
+    "en": "Aerospace engineering designs aircraft.",
+    "zh": "航空航天工程设计飞行器。",
+    "domain": "science"
+  },
+  {
+    "en": "Limitations are acknowledged honestly.",
+    "zh": "局限性被诚实地承认。",
+    "domain": "academic"
+  },
+  {
+    "en": "Quantum computing solves complex problems.",
+    "zh": "量子计算解决复杂问题。",
+    "domain": "tech"
+  },
+  {
+    "en": "The train arrived on time.",
+    "zh": "火车准时到达。",
+    "domain": "daily"
+  },
+  {
+    "en": "Supply chains require efficient logistics.",
+    "zh": "供应链需要高效物流。",
+    "domain": "business"
+  },
+  {
+    "en": "The algorithm improves system performance.",
+    "zh": "该算法提升了系统性能。",
+    "domain": "tech"
+  },
+  {
+    "en": "Operational efficiency reduces costs.",
+    "zh": "运营效率降低成本。",
+    "domain": "business"
+  },
+  {
+    "en": "Materials science develops new materials.",
+    "zh": "材料科学开发新材料。",
+    "domain": "science"
+  },
+  {
+    "en": "The restaurant serves good food.",
+    "zh": "这家餐厅的食物很好。",
+    "domain": "daily"
+  },
+  {
+    "en": "Geology studies Earth's structure.",
+    "zh": "地质学研究地球结构。",
+    "domain": "science"
+  },
+  {
+    "en": "Competitive advantage sustains growth.",
+    "zh": "竞争优势维持增长。",
+    "domain": "business"
+  },
+  {
+    "en": "Marketing strategies target specific audiences.",
+    "zh": "营销策略针对特定受众。",
+    "domain": "business"
+  },
+  {
+    "en": "Corporate governance ensures accountability.",
+    "zh": "公司治理确保问责。",
+    "domain": "business"
+  },
+  {
+    "en": "Edge computing reduces latency.",
+    "zh": "边缘计算降低延迟。",
+    "domain": "tech"
+  },
+  {
+    "en": "The literature review covers recent work.",
+    "zh": "文献综述涵盖了近期工作。",
+    "domain": "academic"
+  },
+  {
+    "en": "The experiment confirmed the hypothesis.",
+    "zh": "实验验证了假设。",
+    "domain": "science"
+  },
+  {
+    "en": "APIs connect different software systems.",
+    "zh": "API连接不同软件系统。",
+    "domain": "tech"
+  },
+  {
+    "en": "Data mining reveals hidden patterns.",
+    "zh": "数据挖掘揭示隐藏模式。",
+    "domain": "tech"
+  },
+  {
+    "en": "Cybersecurity protects digital infrastructure.",
+    "zh": "网络安全保护数字基础设施。",
+    "domain": "tech"
+  },
+  {
+    "en": "Computer vision analyzes images.",
+    "zh": "计算机视觉分析图像。",
+    "domain": "tech"
+  },
+  {
+    "en": "Assumptions are clearly stated.",
+    "zh": "假设被明确说明。",
+    "domain": "academic"
+  },
+  {
+    "en": "Traffic was heavy this morning.",
+    "zh": "今天早上交通很拥挤。",
+    "domain": "daily"
+  },
+  {
+    "en": "The introduction sets the context.",
+    "zh": "引言设定了背景。",
+    "domain": "academic"
+  },
+  {
+    "en": "Astronomy studies celestial objects.",
+    "zh": "天文学研究天体。",
+    "domain": "science"
+  },
+  {
+    "en": "E-commerce grows rapidly worldwide.",
+    "zh": "电子商务全球快速增长。",
+    "domain": "business"
+  },
+  {
+    "en": "Strategic planning guides organizations.",
+    "zh": "战略规划指导组织。",
+    "domain": "business"
+  },
+  {
+    "en": "The study contributes to the field.",
+    "zh": "研究对该领域有贡献。",
+    "domain": "academic"
+  },
+  {
+    "en": "Investment portfolios diversify risk.",
+    "zh": "投资组合分散风险。",
+    "domain": "business"
+  },
+  {
+    "en": "The flowers bloom in summer.",
+    "zh": "花在夏天开放。",
+    "domain": "daily"
+  },
+  {
+    "en": "Data collection followed strict protocols.",
+    "zh": "数据收集遵循严格协议。",
+    "domain": "academic"
+  },
+  {
+    "en": "The park is beautiful in spring.",
+    "zh": "公园在春天很美。",
+    "domain": "daily"
+  },
+  {
+    "en": "We walked along the beach.",
+    "zh": "我们沿着海滩散步。",
+    "domain": "daily"
+  },
+  {
+    "en": "Biology examines living organisms.",
+    "zh": "生物学研究生命体。",
+    "domain": "science"
+  },
+  {
+    "en": "Autonomous vehicles navigate without drivers.",
+    "zh": "自动驾驶车辆无需驾驶员。",
+    "domain": "tech"
+  },
+  {
+    "en": "Ecology examines environmental interactions.",
+    "zh": "生态学研究环境互动。",
+    "domain": "science"
+  },
+  {
+    "en": "Robotics automates physical tasks.",
+    "zh": "机器人自动化物理任务。",
+    "domain": "tech"
+  }
+]

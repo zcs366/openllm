@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "description": "MistakeLedger错误记录Schema——Agent的犯错记录本",
+  "fields": {
+    "timestamp": {
+      "type": "ISO8601",
+      "required": true,
+      "description": "错误发生时间，自动生成"
+    },
+    "what": {
+      "type": "string",
+      "required": true,
+      "description": "发生了什么错误——用一句话描述"
+    },
+    "why": {
+      "type": "string",
+      "required": true,
+      "description": "为什么是错误——期望与实际的差距"
+    },
+    "agent": {
+      "type": "string",
+      "required": false,
+      "default": "",
+      "description": "哪个Agent/模块犯的错"
+    },
+    "severity": {
+      "type": "enum",
+      "values": ["low", "medium", "high", "critical"],
+      "required": false,
+      "default": "medium",
+      "description": "错误严重程度"
+    },
+    "session_id": {
+      "type": "string",
+      "required": false,
+      "default": "",
+      "description": "发生错误的会话ID"
+    },
+    "tags": {
+      "type": "list[string]",
+      "required": false,
+      "default": [],
+      "description": "可选标签，用于分类检索"
+    }
+  },
+  "storage": {
+    "format": "JSONL",
+    "path": "~/.hermes/openllm/mistakes.jsonl",
+    "max_size_mb": 10,
+    "rotation": "按大小轮转，超过10MB归档旧文件"
+  },
+  "invariants": [
+    "每条记录必须有timestamp+what+why",
+    "JSONL追加写入，不覆盖",
+    "query返回按时间倒序",
+    "统计基于全量数据，不缓存"
+  ]
+}

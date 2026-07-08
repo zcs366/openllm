@@ -1,0 +1,32 @@
+[
+  {
+    "en": "The research team published their findings in a prestigious journal.",
+    "zh": "研究团队在权威期刊上发表了他们的发现。",
+    "domain": "science",
+    "difficulty": "medium"
+  },
+  {
+    "en": "Climate change poses significant challenges to global ecosystems.",
+    "zh": "气候变化对全球生态系统构成了重大挑战。",
+    "domain": "science",
+    "difficulty": "hard"
+  },
+  {
+    "en": "The algorithm optimizes the performance of the system.",
+    "zh": "该算法优化了系统的性能。",
+    "domain": "technology",
+    "difficulty": "medium"
+  },
+  {
+    "en": "Deep learning has revolutionized natural language processing.",
+    "zh": "深度学习彻底改变了自然语言处理。",
+    "domain": "technology",
+    "difficulty": "medium"
+  },
+  {
+    "en": "The thesis presents a novel approach to solving the problem.",
+    "zh": "论文提出了一种解决该问题的新方法。",
+    "domain": "academic",
+    "difficulty": "hard"
+  }
+]

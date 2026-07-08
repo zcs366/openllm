@@ -1,0 +1,73 @@
+{
+  "results": {
+    "d_values": [
+      768,
+      256,
+      128,
+      64,
+      32,
+      16,
+      8,
+      4,
+      2,
+      1
+    ],
+    "snr_values": [
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity
+    ],
+    "kw_values": [
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity,
+      Infinity
+    ],
+    "signal_var_values": [
+      999.9138212507158,
+      999.9138212507158,
+      999.9138212507158,
+      822.4839395903037,
+      564.3844379112444,
+      395.0212805464093,
+      278.7915269922529,
+      159.94741285823278,
+      89.0337675454402,
+      47.198196627438136
+    ],
+    "noise_var_values": [
+      -998.6133475500533,
+      -998.6133475500533,
+      -998.6133475500533,
+      -821.1834658896412,
+      -563.0839642105818,
+      -393.7208068457467,
+      -277.49105329159033,
+      -158.64693915757022,
+      -87.73329384477763,
+      -45.89772292677557
+    ]
+  },
+  "analysis": {
+    "mean": Infinity,
+    "std": NaN,
+    "min": Infinity,
+    "max": Infinity,
+    "cv": NaN,
+    "range": NaN,
+    "stability": "unstable"
+  }
+}

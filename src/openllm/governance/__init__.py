@@ -37,6 +37,7 @@ from .reliability import (
     ReliabilityEvent, RepairResult, HealthSnapshot,
 )
 from .substrate import SubstrateEnforcer, CompiledConstraint, SubstrateGuide
+from .consensus_reasoning import ConsensusReasoning, ReasoningRecord
 
 __all__ = [
     "GovernanceEvent",
@@ -72,4 +73,6 @@ __all__ = [
     "SubstrateEnforcer",
     "CompiledConstraint",
     "SubstrateGuide",
+    "ConsensusReasoning",
+    "ReasoningRecord",
 ]

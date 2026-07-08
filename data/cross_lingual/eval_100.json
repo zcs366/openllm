@@ -1,0 +1,52 @@
+[
+  {
+    "en": "Revenue models generate income.",
+    "zh": "收入模式产生收入。",
+    "domain": "business"
+  },
+  {
+    "en": "The methodology section describes the design.",
+    "zh": "方法论部分描述了设计。",
+    "domain": "academic"
+  },
+  {
+    "en": "Human resources manages talent.",
+    "zh": "人力资源管理人才。",
+    "domain": "business"
+  },
+  {
+    "en": "She goes to the gym regularly.",
+    "zh": "她定期去健身房。",
+    "domain": "daily"
+  },
+  {
+    "en": "Results are statistically significant.",
+    "zh": "结果具有统计显著性。",
+    "domain": "academic"
+  },
+  {
+    "en": "Citations support the arguments.",
+    "zh": "引用支持论点。",
+    "domain": "academic"
+  },
+  {
+    "en": "Market competition drives innovation.",
+    "zh": "市场竞争推动创新。",
+    "domain": "business"
+  },
+  {
+    "en": "Future work is suggested.",
+    "zh": "建议了未来工作。",
+    "domain": "academic"
+  },
+  {
+    "en": "The children played in the garden.",
+    "zh": "孩子们在花园里玩耍。",
+    "domain": "daily"
+  },
+  {
+    "en": "Genetic engineering modifies organisms.",
+    "zh": "基因工程改造生物体。",
+    "domain": "science"
+  }
+]

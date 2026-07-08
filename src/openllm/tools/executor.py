@@ -38,6 +38,8 @@ class ToolRegistry:
         self._tools: dict[str, Callable] = {}
         self._descriptions: dict[str, str] = {}
         self._schemas: dict[str, dict] = {}
+        self._verify_hook: Optional[Callable] = None  # verify-before-complete
+        self._requires_verify: set[str] = {"write_file", "shell"}  # 需要验证的工具
 
     def register(
         self,
@@ -58,8 +60,12 @@ class ToolRegistry:
             for name, desc in self._descriptions.items()
         ]
 
+    def set_verify_hook(self, hook: Callable):
+        """设置verify-before-complete钩子。用于写操作前验证。"""
+        self._verify_hook = hook
+
     def execute(self, tool_name: str, **kwargs) -> ToolResult:
-        """执行工具调用。"""
+        """执行工具调用。写操作前触发verify钩子。"""
         func = self._tools.get(tool_name)
         if func is None:
             return ToolResult(
@@ -67,6 +73,30 @@ class ToolRegistry:
                 success=False,
                 error=f"未知工具: {tool_name}。可用工具: {list(self._tools.keys())}",
             )
+
+        # Verify-before-complete: 写操作前验证
+        if tool_name in self._requires_verify and self._verify_hook:
+            try:
+                verified = self._verify_hook(tool_name, **kwargs)
+                # 支持两种返回格式：bool 或 {"pass": bool, "reason": str}
+                if isinstance(verified, dict):
+                    ok = verified.get("pass", True)
+                    reason = verified.get("reason", "")
+                else:
+                    ok = bool(verified)
+                    reason = ""
+                if not ok:
+                    return ToolResult(
+                        tool_name=tool_name,
+                        success=False,
+                        error=f"验证失败: {tool_name} — {reason}" if reason else f"验证失败: {tool_name}",
+                    )
+            except Exception as e:
+                return ToolResult(
+                    tool_name=tool_name,
+                    success=False,
+                    error=f"验证异常: {e}",
+                )
 
         t0 = time.time()
         try:

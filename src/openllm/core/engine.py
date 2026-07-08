@@ -5,6 +5,7 @@ Agent Loop + Provider + Tools + Memory + Identity + Security
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -12,7 +13,7 @@ import logging
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from .loop import AgentLoop, LoopPhase, AgentState, TurnContext
 from .provider import (
@@ -25,9 +26,23 @@ from ..memory.capsule import (
 from ..identity.soul import (
     Soul, IamPrinciples, IdentityReconstructor, IdentityLevel,
 )
+from ..identity.iam_integration import IamIntegration, create_iam_integration
 from ..security.gate import SecurityFoundation
+from ..security.graceful_shutdown import GracefulShutdown
+from ..security.credential_firewall import CredentialFirewall
 from ..tools.executor import ToolRegistry, ToolResult, create_default_tools
 from .meta import CognitiveDashboard, SelfRescue
+from .error_classifier import ErrorClassifier
+from .failure_tracker import FailureSignatureTracker, create_tracker
+from .oneshot import (
+    oneshot as _oneshot_call,
+    classify as _classify_call,
+    extract as _extract_call,
+    summarize as _summarize_call,
+)
+from .memory_os import MemoryOS as UnifiedMemory
+from .display import DisplayEngine
+from .gateway import Gateway, CLIAdapter, StealthChannelAdapter
 
 logger = logging.getLogger("openllm.engine")
 
@@ -227,9 +242,16 @@ class OpenLLMEngine:
         self.soul = Soul(name=config.name)
         self.iam = IamPrinciples()
         self.reconstructor = IdentityReconstructor(self.soul, self.iam)
+        
+        # Iam Harness v2.3 集成
+        self.iam_harness = create_iam_integration(auto_load=True)
+        if self.iam_harness.is_loaded():
+            logger.info(f"✅ Iam Harness v{self.iam_harness.get_version()} 已集成")
+        else:
+            logger.warning("⚠️ Iam Harness 未加载，身份约束功能不可用")
 
         # Provider
-        self.provider: Optional[DeepSeekProvider] = None
+        self.provider: Optional[Any] = None  # DeepSeekProvider | AnthropicProvider | GeminiProvider
         self._history: list[Message] = []
 
         # 元认知
@@ -237,6 +259,26 @@ class OpenLLMEngine:
         self.rescue = SelfRescue(self.dashboard)
         self.dashboard.on_overload = self.rescue.on_overload
         self.dashboard.on_fatigue = self.rescue.on_fatigue
+
+        # Phase 8/9: Failure Signature Tracker
+        self.failure_tracker = create_tracker()
+
+        # 新模块集成（P0+P1盲区修复）
+        self.display = DisplayEngine()
+        self.error_classifier = ErrorClassifier()
+        self.unified_memory = UnifiedMemory()
+
+        # P2: 优雅停机 + 凭据防火墙
+        self.shutdown = GracefulShutdown()
+        self.shutdown.register_signal_handlers()
+        self.firewall = CredentialFirewall()
+
+        # P1: ISA Gateway（中央网关）
+        self.gateway = Gateway(engine=self)
+        self.gateway.register(CLIAdapter())
+
+        # verify钩子接入executor（P1: verify-before-complete）
+        self.tools.set_verify_hook(self._verify_tool_params)
 
         # IO-S Checkpoint集成（懒加载，线程安全）
         self._checkpoint_mgr = None
@@ -260,16 +302,36 @@ class OpenLLMEngine:
         # 尝试连接
         self._init_provider()
 
+        # ── 老IO-S治理模式集成 ──
+        from .gate import PermissionGate, PermissionMode
+        from .tool_scope import ToolScopeManager, ToolScope
+        from .pipeline import run_pipeline
+        from .hindsight_loop import inject_hindsight
+
+        self.gate = PermissionGate(mode=PermissionMode.DEV)
+        self.tool_scope = ToolScopeManager(scope=ToolScope.DEV)
+        self._run_pipeline = run_pipeline
+        self._inject_hindsight = inject_hindsight
+
+        # P0: 启动安全审计（不阻塞）
+        self._startup_audit()
+
     def _init_provider(self) -> bool:
-        """初始化模型Provider。"""
+        """初始化模型Provider。支持：deepseek/openai/anthropic/gemini/ollama。"""
         try:
-            # Ollama 不需要 API key
-            if self.config.provider == "ollama":
+            p = self.config.provider
+            if p == "ollama":
                 api_key = "ollama"
+            elif p == "anthropic":
+                api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            elif p == "gemini":
+                api_key = os.environ.get("GEMINI_API_KEY", "")
             else:
                 api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-                if not api_key:
-                    return False
+
+            if not api_key and p not in ("ollama",):
+                return False
+
             self.provider = create_provider(
                 self.config.provider,
                 model=self.config.model,
@@ -278,6 +340,58 @@ class OpenLLMEngine:
             return True
         except Exception:
             return False
+
+    # ── P0: 启动安全审计 ────────────────────────────
+
+    def _startup_audit(self):
+        """启动安全审计（不阻塞，不抛异常）。"""
+        try:
+            from ..security.startup_audit import run_startup_audit
+            report = run_startup_audit()
+            # 只在有警告/失败时输出
+            if "❌" in report or "⚠️" in report:
+                print(report)
+        except Exception as e:
+            logger.debug(f"启动审计跳过: {e}")
+
+    # ── P1: 一次性LLM调用（不走agent循环） ────────
+
+    def _get_api_key(self) -> str:
+        """获取当前provider的API key。"""
+        p = self.config.provider
+        if p == "ollama":
+            return "ollama"
+        elif p == "anthropic":
+            return os.environ.get("ANTHROPIC_API_KEY", "")
+        elif p == "gemini":
+            return os.environ.get("GEMINI_API_KEY", "")
+        return os.environ.get("DEEPSEEK_API_KEY", "")
+
+    def oneshot(self, prompt: str, system: str = "你是一个有帮助的助手。",
+                temperature: float = 0.3, max_tokens: int = 1024) -> str:
+        """轻量级LLM调用，跳过agent循环/记忆/工具/身份。
+        适用于：分类、翻译、摘要、结构化提取、简单问答。
+        """
+        return _oneshot_call(
+            prompt, system=system, model=self.config.model,
+            provider=self.config.provider, temperature=temperature,
+            max_tokens=max_tokens, api_key=self._get_api_key(),
+        )
+
+    def classify(self, text: str, categories: list[str]) -> str:
+        """用LLM做分类。返回categories中的一个。"""
+        return _classify_call(text, categories, model=self.config.model,
+                              provider=self.config.provider, api_key=self._get_api_key())
+
+    def extract(self, text: str, schema: str) -> str:
+        """用LLM做结构化提取。返回JSON字符串。"""
+        return _extract_call(text, schema, model=self.config.model,
+                             provider=self.config.provider, api_key=self._get_api_key())
+
+    def summarize(self, text: str, max_words: int = 100) -> str:
+        """用LLM做摘要。"""
+        return _summarize_call(text, max_words=max_words, model=self.config.model,
+                               provider=self.config.provider, api_key=self._get_api_key())
 
     @property
     def connected(self) -> bool:
@@ -332,13 +446,13 @@ class OpenLLMEngine:
         for req in schema["required"]:
             if req not in kwargs or kwargs[req] is None:
                 return {"pass": False, "reason": f"缺少必填参数: {req}"}
-            if not isinstance(kwargs[req], str) or len(str(kwargs[req])) == 0:
-                return {"pass": False, "reason": f"参数{req}为空"}
+            val = kwargs[req]
+            if isinstance(val, str) and len(val) == 0:
+                return {"pass": False, "reason": f"参数{req}为空字符串"}
         # 安全检查：Shell注入检测（正则+上下文感知）
         if tool_name == "shell":
             cmd = kwargs.get("command", "")
             # 危险模式白名单：支持变体（空格、制表符）
-            import re
             dangerous_patterns = [
                 (r'\brm\s+[-/][^;]*\brf\b', "rm -rf 删除操作"),
                 (r'\bsudo\s', "sudo 提权操作"),
@@ -392,7 +506,12 @@ class OpenLLMEngine:
         return {"pass": True, "reason": "", "risk_level": risk}
 
     def wake(self) -> str:
-        """苏醒：加载记忆+重建身份。"""
+        """苏醒：加载记忆+重建身份+恢复运行态。"""
+        # P2: 优雅停机——从DORMANT恢复到RUNNING
+        if self.shutdown.is_dormant:
+            self.shutdown.begin_wake()
+            self.shutdown.complete_wake()
+
         mem_ctx = self.memory.read()
         session_ctx = {
             "relationship_depth": "\u8001\u642d\u6863",
@@ -433,6 +552,15 @@ class OpenLLMEngine:
             lines.append(f"🔗 模型：{self.config.model}")
         else:
             lines.append("⚠️ 未连接API（设置 DEEPSEEK_API_KEY 环境变量）")
+
+        # P0: display welcome
+        self.display.welcome({
+            "name": self.config.name,
+            "version": "v0.2.0",
+            "session_id": f"s{int(time.time())}",
+            "status": "ready" if self.connected else "no_api",
+        })
+
         return "\n".join(lines)
 
     def _build_system_prompt(self, identity: str, mem_ctx: dict) -> str:
@@ -458,14 +586,19 @@ class OpenLLMEngine:
         """
         一轮完整对话。
 
-        1. 安全检查
-        2. Agent Loop → plan
-        3. 判断是否需要工具调用
-        4. 调用模型（流式）
-        5. 返回响应
+        1. 停机检查
+        2. 安全检查
+        3. Agent Loop → plan
+        4. 判断是否需要工具调用
+        5. 调用模型（流式）
+        6. 返回响应
         """
         if not user_input.strip():
             return ""
+
+        # P2: 优雅停机检查
+        if not self.shutdown.can_accept:
+            return "⏳ Agent正在停机中，请稍候..."
 
         # 安全检查
         ok, reason = self.security.check_action("read_memory")
@@ -494,27 +627,51 @@ class OpenLLMEngine:
         return response
 
     def _call_model(self, stream: bool = True) -> str:
-        """调用模型。流式输出到终端。"""
-        full = []
+        """调用模型。带错误分类+指数退避重试（P0: error_classifier集成）。"""
+        attempt = 0
+        max_attempts = 4  # 1 initial + 3 retries
 
-        def on_token(t: str):
-            full.append(t)
-            print(t, end="", flush=True)
+        while attempt < max_attempts:
+            try:
+                full = []
 
-        resp = self.provider.chat(
-            messages=self._history,
-            stream=stream,
-            on_token=on_token if stream else None,
-        )
+                def on_token(t: str):
+                    # P2: 凭据防火墙——逐token扫描（防止流式泄露到终端）
+                    clean_t = self.firewall.scan_text(t)
+                    full.append(clean_t)
+                    print(clean_t, end="", flush=True)
 
-        if stream:
-            print()  # 换行
-            return "".join(full)
-        else:
-            return resp.content
+                resp = self.provider.chat(
+                    messages=self._history,
+                    stream=stream,
+                    on_token=on_token if stream else None,
+                )
+
+                # P2: 凭据防火墙——扫描模型输出
+                if stream:
+                    print()  # 换行
+                    raw = "".join(full)
+                else:
+                    raw = resp.content
+                return self.firewall.scan_text(raw)
+
+            except Exception as e:
+                classified = self.error_classifier.classify(e)
+                if not self.error_classifier.should_retry(classified, attempt):
+                    self.display.render_error("模型调用", classified.message)
+                    raise
+                delay = self.error_classifier.get_retry_delay(classified, attempt)
+                logger.warning(
+                    f"模型调用失败({classified.category.value}), "
+                    f"第{attempt+1}次重试, 等待{delay:.1f}s: {classified.message}"
+                )
+                time.sleep(delay)
+                attempt += 1
+
+        raise RuntimeError(f"模型调用失败: {max_attempts}次重试后放弃")
 
     def execute_tool(self, tool_name: str, **kwargs) -> ToolResult:
-        """执行工具调用（带安全检查+verify钩子）。"""
+        """执行工具调用（带安全检查+verify钩子+三层管线）。"""
         ok, reason = self.security.check_action(tool_name)
         if not ok:
             return ToolResult(tool_name=tool_name, success=False, error=reason)
@@ -527,6 +684,25 @@ class OpenLLMEngine:
                 error=f"ISN风险检查未通过: {risk_check['reason']}"
             )
 
+        # ── 三层安全管线（老IO-S pipeline） ──
+        try:
+            pipeline_result = self._run_pipeline(
+                input_text=str(kwargs)[:500],
+                source=tool_name,
+                llm_output="",
+                pid="engine",
+            )
+            if not pipeline_result.passed:
+                logger.warning(
+                    f"安全管线拦截 {tool_name}: "
+                    f"confidence={pipeline_result.confidence}, "
+                    f"alerts={pipeline_result.alerts}")
+                return ToolResult(
+                    tool_name=tool_name, success=False,
+                    error=f"安全管线拦截: {pipeline_result.alerts}")
+        except Exception as e:
+            logger.debug(f"安全管线跳过: {e}")
+
         # ── verify钩子：调用前参数验证 ──
         param_check = self._verify_tool_params(tool_name, **kwargs)
         if not param_check["pass"]:
@@ -536,6 +712,12 @@ class OpenLLMEngine:
             )
 
         result = self.tools.execute(tool_name, **kwargs)
+
+        # P2: 凭据防火墙——扫描工具输出
+        if result.output:
+            result.output = self.firewall.scan_text(result.output)
+        if result.error:
+            result.error = self.firewall.scan_text(result.error)
 
         # ── verify钩子：调用后结果验证 ──
         result_check = self._verify_tool_result(tool_name, result)
@@ -614,12 +796,29 @@ class OpenLLMEngine:
         elif result.error:
             verify_reason = result.error
 
+        # ── Phase 8: Failure Signature 提取 ──
+        if not verify_pass and verify_reason:
+            ctx = {"user_input": goal[:200] if goal else ""}
+            sig = self.failure_tracker.extract_signature(tool_name, verify_reason, ctx)
+            evolve_hint = self.failure_tracker.learn_causal(sig)
+            if evolve_hint:
+                logger.info(f"  Phase 8: {evolve_hint}")
+                # Phase 9: 检查是否触发进化
+                if self.failure_tracker.should_evolve():
+                    proposals = self.failure_tracker.evolve()
+                    for p in proposals:
+                        logger.warning(
+                            f"  Phase 9 进化提案: [{p.proposal_type}] "
+                            f"{p.description} (置信度={p.confidence:.0%})"
+                        )
+
+        # 更新loop的工具成功/失败状态（供路由器使用）
+        self.loop._last_tool_success = verify_pass
+
         # 如果有任务上下文，自动提取hindsight经验
         if pid and goal:
             try:
-                # 加载IO-S hindsight_loop（与checkpoint相同路径）
-                sys.path.insert(0, str(Path.home() / "io-s"))
-                from syscall.hindsight_loop import extract_hindsight
+                from .hindsight_loop import extract_hindsight
 
                 hindsight_data = extract_hindsight(
                     pid=pid,
@@ -674,12 +873,21 @@ class OpenLLMEngine:
         # 保留 system prompt (索引 0) + 最近 MAX_HISTORY_TURNS 轮
         system = [self._history[0]] if self._history[0].role == "system" else []
         recent = self._history[-self.MAX_HISTORY_TURNS * 2:]  # user + assistant 各半
-        summary = f"[已截断: 原 {len(self._history)} 条消息]"
+        old_count = len(self._history)
         self._history = system + recent
-        logger.debug(f"History trimmed: kept {len(self._history)}/{len(system) + len(recent)}")
+        logger.debug(f"History trimmed: {old_count} → {len(self._history)}")
 
     def sleep(self) -> str:
-        """休眠：写Delta胶囊+检查点+保存审计。"""
+        """休眠：写Delta胶囊+检查点+保存审计+flush异步记忆+状态转DORMANT。"""
+        # P1: 异步记忆flush
+        if self.unified_memory.pending_writes > 0:
+            self.unified_memory.flush()
+            logger.debug(f"统一记忆flush: {self.unified_memory.pending_writes}条待写入")
+
+        # P2: 优雅停机——排空后转DORMANT
+        self.shutdown.begin_drain()
+        self.shutdown.begin_suspend()
+
         # IO-S checkpoint: 休眠前最后快照
         if self._checkpoint_mgr:
             self._checkpoint_mgr.snapshot(self._checkpoint_region)

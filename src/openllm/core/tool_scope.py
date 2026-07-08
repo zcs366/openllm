@@ -1,125 +1,133 @@
-"""ToolScope — IO-S工具作用域治理
+"""tool_scope.py — 工具作用域治理
 
-根据任务阶段、上下文、权限级别动态裁剪可用工具集。
-"给Agent一长串工具会降低性能"（Vercel实证：移除80%工具后结果改善）。
-
-预定义作用域（4种）：
-  - readonly：只读工具
-  - development：读写+执行
-  - research：搜索+读取
-  - admin：全部工具（需人工确认破坏性操作）
+来自老IO-S syscall/tool_scope.py：
+  - 4种作用域: readonly / dev / research / admin
+  - 按任务阶段动态切换工具集
+  - 对接ISN元数据（risk_level + permission_level + side_effects）
 """
 
-from __future__ import annotations
+import logging
+from enum import Enum
 from typing import Optional
 
-# ── 预定义作用域 ─────────────────────────────────────
+logger = logging.getLogger("openllm.tool_scope")
 
-# 作用域定义：{scope_name: [tool_names]}
-_SCOPES: dict[str, list[str]] = {
-    "readonly": [
-        "read_file",
-        "search",
-        "search_files",
-        "web_search",
-        "session_search",
-    ],
-    "development": [
-        "read_file",
-        "write_file",
-        "patch",
-        "shell",
-        "search",
-        "search_files",
-        "list_dir",
-        "execute_tool",
-    ],
-    "research": [
-        "web_search",
-        "web_extract",
-        "bing_search",
-        "read_file",
-        "search",
-        "search_files",
-        "session_search",
-        "read_memory",
-    ],
-    "admin": [
-        # 全部工具 — 运行时动态组装
-    ],
+
+class ToolScope(str, Enum):
+    READONLY = "readonly"
+    DEV = "dev"
+    RESEARCH = "research"
+    ADMIN = "admin"
+
+
+SCOPE_CONFIG = {
+    ToolScope.READONLY: {
+        "description": "只读模式 — 搜索、查询、读取文件",
+        "allowed_types": ["search", "read", "query"],
+        "blocked_types": [
+            "write", "execute", "network", "delete"],
+        "risk_threshold": "low",
+        "requires_approval": False,
+    },
+    ToolScope.DEV: {
+        "description": "开发模式 — 写文件、执行代码、终端命令",
+        "allowed_types": [
+            "search", "read", "query", "write", "execute"],
+        "blocked_types": ["delete", "network"],
+        "risk_threshold": "medium",
+        "requires_approval": False,
+    },
+    ToolScope.RESEARCH: {
+        "description": "研究模式 — 读+写分析文件、网络请求",
+        "allowed_types": [
+            "search", "read", "query", "write", "network"],
+        "blocked_types": ["delete"],
+        "risk_threshold": "high",
+        "requires_approval": False,
+    },
+    ToolScope.ADMIN: {
+        "description": "管理模式 — 全部权限（需人工确认）",
+        "allowed_types": [
+            "search", "read", "query", "write",
+            "execute", "network", "delete"],
+        "blocked_types": [],
+        "risk_threshold": "critical",
+        "requires_approval": True,
+    },
 }
 
-# 危险(破坏性)操作——admin模式下也需人工确认
-_DESTRUCTIVE_TOOLS: set[str] = {
-    "shell",           # 可执行任意命令
-    "write_file",      # 可覆盖文件
-    "publish",         # 可发布信息
-    "delete_file",     # 可删除文件
-    "self_modify",     # 可修改自身代码
-    "disable_security",  # 可关闭安全
-}
+# 风险等级排序
+RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
 
-def get_scope_tools(scope: str) -> list[str]:
-    """获取指定作用域的可用工具列表。"""
-    if scope not in _SCOPES:
-        raise ValueError(f"未知作用域: {scope}。可用: {list(_SCOPES.keys())}")
-    return list(_SCOPES[scope])
+class ToolScopeManager:
+    """工具作用域管理器。"""
 
+    def __init__(self, scope: ToolScope = ToolScope.DEV):
+        self._scope = scope
+        self._config = SCOPE_CONFIG[scope]
+        self._isn_metadata: dict = {}  # tool_name → metadata
 
-def list_scopes() -> list[dict]:
-    """列出所有可用作用域。"""
-    return [
-        {
-            "name": name,
-            "tool_count": len(tools) if tools else "all",
-            "destructive": any(t in _DESTRUCTIVE_TOOLS for t in tools) if tools else True,
+    @property
+    def scope(self) -> ToolScope:
+        return self._scope
+
+    def switch_scope(self, scope: ToolScope):
+        self._scope = scope
+        self._config = SCOPE_CONFIG[scope]
+        logger.info(f"工具作用域切换: {scope.value}")
+
+    def is_tool_allowed(self, tool_name: str,
+                        tool_type: Optional[str] = None,
+                        tool_risk: Optional[str] = None
+                        ) -> tuple[bool, str]:
+        """检查工具是否在当前作用域内。
+
+        优先使用ISN元数据，fallback到tool_type。
+        """
+        # 查ISN元数据
+        meta = self._isn_metadata.get(tool_name, {})
+        effective_type = tool_type or meta.get("type", "unknown")
+        effective_risk = tool_risk or meta.get("risk_level", "low")
+
+        # 检查风险阈值
+        threshold = self._config.get("risk_threshold", "low")
+        if RISK_ORDER.get(effective_risk, 0) > RISK_ORDER.get(
+                threshold, 0):
+            return False, (
+                f"工具 '{tool_name}' 风险等级 {effective_risk} "
+                f"超过作用域阈值 {threshold}")
+
+        # 检查类型
+        blocked = self._config.get("blocked_types", [])
+        if effective_type in blocked:
+            return False, (
+                f"工具类型 '{effective_type}' 在 "
+                f"{self._scope.value} 作用域被禁止")
+
+        allowed = self._config.get("allowed_types", [])
+        if effective_type in allowed:
+            return True, ""
+
+        return False, (
+            f"工具类型 '{effective_type}' 未在 "
+            f"{self._scope.value} 作用域允许列表中")
+
+    def load_isn_metadata(self, metadata_list: list[dict]):
+        """加载ISN工具元数据。"""
+        for meta in metadata_list:
+            name = meta.get("name") or meta.get("skill_id", "")
+            if name:
+                self._isn_metadata[name] = meta
+        logger.info(
+            f"加载 {len(metadata_list)} 个ISN工具元数据")
+
+    def get_status(self) -> dict:
+        return {
+            "scope": self._scope.value,
+            "description": self._config["description"],
+            "risk_threshold": self._config["risk_threshold"],
+            "allowed_types": self._config["allowed_types"],
+            "blocked_types": self._config["blocked_types"],
+            "isn_tools_loaded": len(self._isn_metadata),
         }
-        for name, tools in _SCOPES.items()
-    ]
-
-
-def filter_by_scope(tools: list[str], scope: str) -> list[str]:
-    """根据作用域过滤工具列表。"""
-    if scope == "admin":
-        return list(tools)
-    allowed = set(_SCOPES.get(scope, []))
-    return [t for t in tools if t in allowed]
-
-
-def is_scope_allowed(tool_name: str, scope: str) -> bool:
-    """检查工具是否在当前作用域内。"""
-    if scope == "admin":
-        return True
-    allowed = set(_SCOPES.get(scope, []))
-    return tool_name in allowed
-
-
-def is_destructive(tool_name: str) -> bool:
-    """检查工具是否为破坏性操作。"""
-    return tool_name in _DESTRUCTIVE_TOOLS
-
-
-# ── 作用域建议（根据任务阶段） ─────────────────────
-
-_TASK_SCOPE_MAP: dict[str, str] = {
-    "planning": "readonly",        # 规划阶段：只读
-    "code_generation": "development",  # 编码阶段：读写
-    "code_review": "readonly",     # 审查阶段：只读
-    "research": "research",        # 研究阶段：搜索+读取
-    "debugging": "development",    # 调试阶段：读写+执行
-    "documentation": "development",  # 文档阶段：读写
-    "architecture_design": "readonly",  # 架构设计：只读
-    "tool_call": "development",    # 工具调用：按需
-}
-
-
-def suggest_scope(task_type: str) -> str:
-    """根据任务类型建议作用域。"""
-    return _TASK_SCOPE_MAP.get(task_type, "readonly")
-
-
-def get_tools_for_task(task_type: str, all_tools: list[str]) -> list[str]:
-    """为指定任务类型获取裁剪后的工具列表。"""
-    scope = suggest_scope(task_type)
-    return filter_by_scope(all_tools, scope)

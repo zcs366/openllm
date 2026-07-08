@@ -12,6 +12,8 @@ from enum import Enum, auto
 from typing import Any, Callable, Optional
 import time
 
+from .router import RuleRouter, RoutingContext, PhaseAction, create_router
+
 
 class LoopPhase(Enum):
     """Agent循环四阶段。"""
@@ -54,6 +56,8 @@ class AgentLoop:
     context_used: int = 0
     state: AgentState = AgentState.WAKING
     turn_count: int = 0
+    # 路由器（默认启用）
+    router: RuleRouter = field(default_factory=RuleRouter)
 
     # 外部注入的回调（由Memory/Identity/Security层提供）
     on_plan: Optional[Callable] = None
@@ -87,26 +91,72 @@ class AgentLoop:
         ctx = TurnContext(user_input=user_input)
         self.turn_count += 1
 
-        # Phase 1: PLAN — 理解意图，拆解任务
-        ctx.phase = LoopPhase.PLAN
-        if self.on_plan:
-            ctx.plan = self.on_plan(user_input, self._memory, self._identity)
+        # ── 路由决策 ──
+        context_pct = self.context_used / self.max_context_tokens if self.max_context_tokens else 0
+        consecutive = self.router.get_consecutive_identical(user_input)
+        routing_ctx = RoutingContext(
+            user_input=user_input,
+            turn_count=self.turn_count,
+            context_used_pct=context_pct,
+            consecutive_identical=consecutive,
+            last_tool_success=self._last_tool_success if hasattr(self, '_last_tool_success') else None,
+        )
+        decisions = self.router.route(routing_ctx)
+        self.router.record_intent(user_input)
 
-        # Phase 2: ACT — 选择工具并执行
-        # （工具执行由Tool Executor层负责，这里只是占位）
-        ctx.phase = LoopPhase.ACT
+        # ── 按路由决策执行各阶段 ──
+        for dec in decisions:
+            phase = LoopPhase[dec.phase]
+            ctx.phase = phase
+            
+            if dec.action == PhaseAction.SKIP:
+                # 跳过：记录原因但不执行
+                ctx.observations.append(f"[路由] {dec.phase} 已跳过: {dec.reason}")
+                continue
+            
+            if dec.action == PhaseAction.DEGRADED:
+                # 降级：执行轻量版
+                if phase == LoopPhase.REFLECT:
+                    ctx.reflection = f"[轻量反思] {dec.reason}"
+                elif phase == LoopPhase.OBSERVE:
+                    ctx.observations.append(f"[轻量观察] {dec.reason}")
+                else:
+                    # 其他阶段的降级 = 正常执行（未来可细化）
+                    self._execute_phase(phase, ctx)
+                continue
+            
+            # PhaseAction.RUN: 正常执行
+            self._execute_phase(phase, ctx)
 
-        # Phase 3: OBSERVE — 读取结果
-        ctx.phase = LoopPhase.OBSERVE
+        # 记录路由统计
+        ctx.self_state["routing"] = {
+            "skipped": sum(1 for d in decisions if d.action == PhaseAction.SKIP),
+            "degraded": sum(1 for d in decisions if d.action == PhaseAction.DEGRADED),
+            "total": len(decisions),
+        }
 
-        # Phase 4: REFLECT — 修正理解，更新记忆
-        ctx.phase = LoopPhase.REFLECT
-        ctx.self_state = self.check_vitals()
-        if self.on_reflect:
-            ctx.reflection = self.on_reflect(ctx)
-
-        self.state = AgentState.WORKING
+        # 自检
+        vitals = self.check_vitals()
         return ctx
+
+    def _execute_phase(self, phase: LoopPhase, ctx: TurnContext):
+        """执行单个阶段。"""
+        if phase == LoopPhase.PLAN:
+            if self.on_plan:
+                ctx.plan = self.on_plan(ctx.user_input, self._memory, self._identity)
+        elif phase == LoopPhase.ACT:
+            # 工具执行由Tool Executor层负责
+            pass
+        elif phase == LoopPhase.OBSERVE:
+            # 结果观察由Tool Executor层负责
+            pass
+        elif phase == LoopPhase.REFLECT:
+            if self.on_reflect:
+                ctx.reflection = self.on_reflect(ctx)
+
+    # ── User Correction 追踪（P1） ──────────────────
+    _corrections: list = field(default_factory=list)
+    _last_tool_success: Optional[bool] = None
 
     def sleep(self) -> dict:
         """休眠：生成当前状态的Δ差分，准备写入胶囊。"""
