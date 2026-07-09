@@ -596,6 +596,15 @@ class IOS:
         # 兼容旧接口
         self.cap = self.cap_policy
 
+        # [进化] 拒绝权——被否决的proposal可申诉
+        try:
+            from ..governance.rejection import RejectionEngine, RejectionReason
+            self._rejection_engine = RejectionEngine()
+            self._RejectionReason = RejectionReason
+        except Exception:
+            self._rejection_engine = None
+            self._RejectionReason = None
+
         # 因果记忆
         self.causal_memory: list[dict] = []
 
@@ -935,7 +944,7 @@ class IOS:
     def arbitrate(self, proposal: Proposal, critique: Critique, 
                   risk: Optional[RiskAssessment] = None) -> Decision:
         """
-        Phase 6: 仲裁 — 5级策略栈
+        Phase 6: 仲裁 — 5级策略栈 + 拒绝权记录
         
         Level 1: single — 只用左脑提案，跳过右脑
         Level 2: self_consistency — 左脑多次采样→投票
@@ -945,12 +954,14 @@ class IOS:
         """
         # 风险拦截
         if risk and risk.is_blocked():
-            return Decision(
+            decision = Decision(
                 action="deny",
                 approved=False,
                 reason=f"安全拦截: {risk.reason}",
                 risk_ref=risk,
             )
+            self._record_rejection(proposal, decision, risk.reason)
+            return decision
         
         # 风险驱动策略选择
         level = self._select_strategy(risk)
@@ -965,7 +976,6 @@ class IOS:
             )
         
         # Level 2: self_consistency — TODO: M1实现真正的self_consistency
-        # 当前降级为Level 1（单左脑提案）
         if level == 2:
             return Decision(
                 action="execute",
@@ -975,7 +985,6 @@ class IOS:
             )
         
         # Level 3: multi_persona — TODO: M1实现真正的multi_persona
-        # 当前降级为Level 1（单左脑提案）
         if level == 3:
             return Decision(
                 action="execute",
@@ -989,25 +998,50 @@ class IOS:
             if critique.verdict == "approve":
                 return Decision(action="execute", approved=True, reason="Level 4: 右脑通过", risk_ref=risk)
             if critique.verdict == "reject":
-                return Decision(action="deny", approved=False, 
+                decision = Decision(action="deny", approved=False, 
                               reason=f"Level 4: 右脑否决: {critique.concerns[0] if critique.concerns else '无理由'}",
                               risk_ref=risk)
+                self._record_rejection(proposal, decision, decision.reason)
+                return decision
             if critique.verdict == "revise":
                 if self._arbiter_policy == "conservative":
                     return Decision(action="revise", approved=False, reason="Level 4: 右脑建议修改，暂缓", risk_ref=risk)
                 return Decision(action="execute", approved=True, reason="Level 4: 策略允许存疑执行", risk_ref=risk)
         
-        # Level 5: debate_then_verify — 对弈+验证（简化版：要求右脑明确批准）
+        # Level 5: debate_then_verify — 对弈+验证
         if level == 5:
             if critique.verdict == "approve":
                 return Decision(action="execute", approved=True, reason="Level 5: 对弈+验证通过", risk_ref=risk)
             else:
-                return Decision(action="deny", approved=False, 
-                              reason=f"Level 5: critical风险需要明确批准，当前={critique.verdict}",
-                              risk_ref=risk)
+                decision = Decision(action="deny", approved=False, 
+                              reason=f"Level 5: critical风险需要明确批准，当前={critique.verdict}", risk_ref=risk)
+                self._record_rejection(proposal, decision, decision.reason)
+                return decision
         
         # 默认放行
         return Decision(action="execute", approved=True, reason="默认放行", risk_ref=risk)
+    
+    def _record_rejection(self, proposal: Proposal, decision: Decision, reason: str):
+        """记录拒绝——通过RejectionEngine创建不可变记录"""
+        if not self._rejection_engine:
+            return
+        try:
+            # 映射到RejectionReason
+            if "安全" in reason or "拦截" in reason:
+                rej_reason = self._RejectionReason.CONSTITUTIONAL
+            elif "否决" in reason:
+                rej_reason = self._RejectionReason.OUT_OF_SCOPE
+            else:
+                rej_reason = self._RejectionReason.UNCERTAIN_SAFETY
+            
+            self._rejection_engine.reject(
+                instruction=proposal.content[:200],
+                reason=rej_reason,
+                reasoning=reason,
+                context={"proposal_confidence": proposal.confidence, "action": decision.action},
+            )
+        except Exception:
+            pass  # 拒绝权记录失败不阻塞主流程
     
     def _select_strategy(self, risk: Optional[RiskAssessment]) -> int:
         """风险驱动策略选择"""
