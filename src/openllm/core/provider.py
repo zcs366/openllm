@@ -63,7 +63,7 @@ class ModelConfig:
 
 
 @dataclass
-class Message:
+class ChatMessage:
     """单条消息。"""
     role: str  # "system" | "user" | "assistant"
     content: str
@@ -94,7 +94,7 @@ class DeepSeekProvider:
 
     def chat(
         self,
-        messages: list[Message],
+        messages: list[ChatMessage],
         system: Optional[str] = None,
         stream: bool = False,
         on_token: Optional[Callable[[str], None]] = None,
@@ -115,7 +115,7 @@ class DeepSeekProvider:
         else:
             return self._sync_chat(payload, t0)
 
-    def _build_messages(self, messages: list[Message], system: Optional[str] = None) -> list[dict]:
+    def _build_messages(self, messages: list[ChatMessage], system: Optional[str] = None) -> list[dict]:
         """构建消息列表。"""
         result = []
         if system:
@@ -249,7 +249,7 @@ class AnthropicProvider:
 
     def chat(
         self,
-        messages: list[Message],
+        messages: list[ChatMessage],
         system: Optional[str] = None,
         stream: bool = False,
         on_token: Optional[Callable[[str], None]] = None,
@@ -340,7 +340,7 @@ class GeminiProvider:
 
     def chat(
         self,
-        messages: list[Message],
+        messages: list[ChatMessage],
         system: Optional[str] = None,
         stream: bool = False,
         on_token: Optional[Callable[[str], None]] = None,
@@ -461,3 +461,7 @@ def create_provider(provider_type: str = DEFAULT_PROVIDER, **kwargs) -> Any:
         return DeepSeekProvider(config)  # 同接口
     else:
         raise ValueError(f"不支持的Provider: {provider_type}。支持: deepseek/openai/anthropic/gemini/ollama")
+
+
+# Backward compatibility alias
+Message = ChatMessage

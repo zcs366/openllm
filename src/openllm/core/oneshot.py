@@ -15,7 +15,7 @@ One-shot直接调provider，跳过agent loop。
 import logging
 from typing import Optional
 
-from .provider import Message, create_provider
+from .provider import ChatMessage as Message, create_provider
 
 logger = logging.getLogger("openllm.oneshot")
 

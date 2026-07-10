@@ -429,7 +429,7 @@ class Gateway:
                 response = f"[Gateway无Engine] 收到: {msg.content}"
 
             # 记录响应到session
-            from .provider import Message
+            from .provider import ChatMessage as Message
             session.append(Message(role="assistant", content=response))
 
             # 路由响应回频道
