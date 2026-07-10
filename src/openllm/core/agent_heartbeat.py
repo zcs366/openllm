@@ -207,8 +207,8 @@ def execute_tick(agent, msg: Message):
 
 def _handle_tool_validation(agent, decision, result, turn):
     """Phase 7.5: tool_validator自动验证"""
-    from .main_loop import _HAS_TOOL_VALIDATOR, _TVToolCall, _tv_validate
-    if not _HAS_TOOL_VALIDATOR or not result.success:
+    from .tool_validator_types import ToolCall, validate_tool_result
+    if not result.success:
         return
     
     try:
@@ -218,13 +218,13 @@ def _handle_tool_validation(agent, decision, result, turn):
         _tool_type_map = {"read_file": "read", "write_file": "write",
                           "search_files": "search", "terminal": "execute"}
         _tool_type = _tool_type_map.get(_tool_name, "execute")
-        _tv_call = _TVToolCall(
+        _tv_call = ToolCall(
             tool_name=_tool_name, tool_type=_tool_type,
             params=_first.get("args", {}) if isinstance(_first, dict) else {},
             result=result.output, duration_ms=result.duration_ms,
             session_id=getattr(agent.session, 'id', ''), turn_id=turn.id,
         )
-        _tv_report = _tv_validate(_tv_call)
+        _tv_report = validate_tool_result(_tv_call)
         turn.trace_phase("validate", _tv_report.overall.value,
                        detail=f"checks={len(_tv_report.checks)} retry={_tv_report.should_retry} block={_tv_report.should_block}")
         if _tv_report.should_block:

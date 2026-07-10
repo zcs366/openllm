@@ -24,7 +24,7 @@ from .session import Session, Turn, TurnStatus, create_session
 
 # 可选依赖
 try:
-    from .tool_validator import ToolCall as _TVToolCall, ValidationResult as _TVResult, validate_tool_result as _tv_validate
+    from .tool_validator_types import ToolCall as _TVToolCall, ValidationResult as _TVResult, validate_tool_result as _tv_validate
     _HAS_TOOL_VALIDATOR = True
 except ImportError:
     _HAS_TOOL_VALIDATOR = False
