@@ -82,91 +82,9 @@ class IOS:
     
     def learn_causal(self, ctx: Context, prediction: Prediction,
                      result: ActionResult, delta: CausalDelta):
-        """Phase 8: 因果学习 — Self-Harness Weakness Mining + 治理转换
-        
-        基于 Self-Harness (arXiv 2606.09498):
-        - 提取 (verifier_cause, agent_behavior, mechanism) 失败签名
-        - 按 mechanism 聚类（非关键词匹配，是语义归因）
-        - 记录到 causal_memory + 持久化到磁盘
-        
-        新增（P0: arXiv:2607.01087 治理转换引擎）:
-        - 结构性失败自动触发治理转换
-        - ambiguous失败发GovernanceRequest
-        """
-        entry = {
-            "action": ctx.user_message[:100],
-            "prediction": prediction.summary[:100],
-            "actual": result.output[:100] if result.output else "",
-            "lesson": delta.delta_summary,
-            "timestamp": time.time(),
-            # Self-Harness Weakness Mining 三元组
-            "verifier_cause": self._classify_verifier_cause(result, delta),
-            "mechanism": self._classify_mechanism(result, delta),
-            "prediction_match": delta.prediction_match,
-            "result_success": result.success,
-        }
-        self.causal_memory.append(entry)
-
-        # 持久化到磁盘
-        causal_path = Path.home() / ".openllm" / "output" / "ios" / "causal_memory.jsonl"
-        causal_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(causal_path, "a") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        
-        # 连接4: 回流到jiak world_evolver mismatch_log（五体→记忆层信号传递）
-        if not result.success:
-            jiak_path = Path.home() / ".hermes" / "jiak" / "mismatch_log.jsonl"
-            jiak_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(jiak_path, "a") as f:
-                f.write(json.dumps({
-                    "ts": entry.get("timestamp"),
-                    "card_id": "openllm-ios",
-                    "prediction_ref": "",
-                    "actual": f"[{entry.get('mechanism', 'unknown')}] {result.error[:80] if result.error else result.output[:80]}",
-                    "severity": "high" if entry.get("mechanism") in ("tool_loop", "permission", "timeout") else "medium",
-                }, ensure_ascii=False) + "\n")
-        
-        # ── 治理转换（P0: Phase 8.5）──
-        if not result.success:
-            self._convert_governance(entry, result)
-
-        # ── Hindsight经验闭环（老IO-S模式）──
-        from .hindsight_loop import extract_hindsight
-        hindsight = extract_hindsight(
-            pid="ios",
-            goal=ctx.user_message[:200],
-            result={
-                "success": result.success,
-                "execution_time": result.duration_ms / 1000,
-                "error": result.error,
-            },
-            failure=result.error if not result.success else "",
-        )
-        if hindsight.get("failure_pattern"):
-            entry["hindsight_pattern"] = hindsight["failure_pattern"]
-            entry["hindsight_alternative"] = hindsight.get(
-                "alternative", "")
-
-        # ── P0/P1增强：learn_causal_adapter接入 ──
-        if not result.success:
-            try:
-                import importlib.util as _ilu
-                _isa_path = Path.home() / "projects" / "isa" / "learn_causal_adapter.py"
-                _lca_spec = _ilu.spec_from_file_location("learn_causal_adapter", _isa_path)
-                if _lca_spec and _lca_spec.loader:
-                    _lca_mod = _ilu.module_from_spec(_lca_spec)
-                    _lca_spec.loader.exec_module(_lca_mod)
-                    LearnCausalAdapter = _lca_mod.LearnCausalAdapter
-                adapter = LearnCausalAdapter()
-                adapter.on_failure(
-                    action=entry.get("action", ""),
-                    error=result.error or "",
-                    mechanism=entry.get("mechanism", "unknown"),
-                    tool_name=entry.get("action", "").split("(")[0] if "(" in entry.get("action", "") else "",
-                )
-                adapter.close()
-            except Exception as e:
-                print(f"  learn_causal_adapter failed (non-fatal): {e}")
+        """Phase 8: 因果学习（委托给ios_causal）"""
+        from .ios_causal import learn_causal as _learn
+        _learn(self, ctx, prediction, result, delta)
     
     # ── Self-Harness Weakness Mining 工具 ──
     
