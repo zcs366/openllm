@@ -302,22 +302,40 @@ class UnifiedMemory:
         return results[:top_n]
     
     def _matches_query(self, entry: MemoryEntry, query: str) -> bool:
-        """检查记忆是否匹配查询"""
+        """检查记忆是否匹配查询（支持关键词拆分+字符级匹配）"""
         query_lower = query.lower()
         
-        # 检查键
-        if query_lower in entry.key.lower():
-            return True
+        # 移除常见停用词和标点
+        stop_words = {"的", "是什么", "怎么", "如何", "？", "？", "是", "在", "有", "和", "与", "或", "了", "吗", "呢"}
+        keywords = [w for w in query_lower.split() if w not in stop_words and len(w) > 1]
+        
+        # 如果没有有效关键词，用原始查询
+        if not keywords:
+            keywords = [query_lower]
+        
+        # 检查键（任一关键词匹配即可）
+        key_lower = entry.key.lower()
+        for kw in keywords:
+            if kw in key_lower:
+                return True
+            # 字符级匹配：检查关键词中的字符是否都在键中
+            if len(kw) > 2:
+                chars_in_key = sum(1 for c in kw if c in key_lower)
+                if chars_in_key >= len(kw) * 0.5:  # 50%字符匹配
+                    return True
         
         # 检查值
         value_str = json.dumps(entry.value, ensure_ascii=False).lower()
-        if query_lower in value_str:
-            return True
+        for kw in keywords:
+            if kw in value_str:
+                return True
         
         # 检查标签
         for tag in entry.tags:
-            if query_lower in tag.lower():
-                return True
+            tag_lower = tag.lower()
+            for kw in keywords:
+                if kw in tag_lower:
+                    return True
         
         return False
     
