@@ -1,3 +1,4 @@
+from .degradation_trace import trace_degradation
 """extracted from main_loop.py"""
 import json, os, time, uuid
 from dataclasses import dataclass, field, asdict
@@ -51,8 +52,8 @@ class ISA:
                 memory["recalled"] = [{"content": str(r.value)[:200],
                                        "importance": r.importance,
                                        "key": r.key} for r in recalled]
-        except Exception:
-            pass  # 降级：不影响主流程
+        except Exception as _e:
+            trace_degradation("ISA", "build_context", _e)
         
         # ③ 工具 — 动态获取
         tools = ["read_file", "search_files"]

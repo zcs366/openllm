@@ -1,3 +1,4 @@
+from .degradation_trace import trace_degradation
 """extracted from main_loop.py"""
 import json, os, time, uuid
 from dataclasses import dataclass, field, asdict

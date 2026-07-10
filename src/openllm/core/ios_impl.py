@@ -1,3 +1,4 @@
+from .degradation_trace import trace_degradation
 """
 openLLM IOS — 决策·进化·恢复（从main_loop.py提取）
 
@@ -248,8 +249,8 @@ class IOS:
                         agent_id="ios",
                         details=f"mechanism={entry.get('mechanism')}, rule_id={rule.rule_id}"
                     )
-                except Exception:
-                    pass  # 审计失败不应影响主循环
+                except Exception as _e:
+                    trace_degradation("IOS", "arbitrate", _e)
             
             elif conversion.classification == "ambiguous" and conversion.governance_request:
                 req = conversion.governance_request
@@ -319,8 +320,8 @@ class IOS:
                     details=rule_descs,
                 )
         
-        except Exception:
-            pass  # 治理规则检查失败不影响主循环
+        except Exception as _e:
+            trace_degradation("IOS", "arbitrate", _e)
         
         return None
     
@@ -500,8 +501,8 @@ class IOS:
                 reasoning=reason,
                 context={"proposal_confidence": proposal.confidence, "action": decision.action},
             )
-        except Exception:
-            pass  # 拒绝权记录失败不阻塞主流程
+        except Exception as _e:
+            trace_degradation("IOS", "arbitrate", _e)
     
     def _select_strategy(self, risk: Optional[RiskAssessment]) -> int:
         """风险驱动策略选择"""
