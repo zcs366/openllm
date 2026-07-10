@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-openLLM Agent主循环 — 六体组装层
+openLLM Agent主循环 — 三体组装层
 
-所有体已提取到独立文件，此处只做组装。
+感知层(ISA+章鱼I) → 决策层(IOS) → 执行层(ISN+IKO)
+心跳驱动三层轮流工作。
 """
 import json, os, sys, time, uuid
 from pathlib import Path
@@ -12,12 +13,10 @@ from .models import (Message, Context, Prediction, RiskAssessment,
                      Proposal, Critique, Decision, ActionResult,
                      CausalDelta, TickMetrics)
 
-# 六体实现
-from .isa_impl import ISA
-from .octopus_impl import 章鱼I
-from .ios_impl import IOS
-from .isn_impl import ISN
-from .iko_impl import IKO
+# 三层架构
+from .perception import ISA, 章鱼I        # 感知层：我知道什么
+from .decision import IOS                  # 决策层：我决定什么
+from .execution import ISN, IKO            # 执行层：我做什么
 from .provider_impl import LLMProvider
 
 # Session
