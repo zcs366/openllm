@@ -110,6 +110,17 @@ class ISN:
         try:
             # 如果有tool_calls，执行对应工具
             output = self._execute_action(decision)
+            
+            # [进化] 发送skill_created信号
+            try:
+                from .isn_signal import skill_created
+                tool_calls = getattr(decision, 'tool_calls', None) or []
+                for tc in tool_calls:
+                    name = tc.get("name", "unknown") if isinstance(tc, dict) else str(tc)
+                    skill_created(name, "")
+            except Exception:
+                pass
+            
             return ActionResult(success=True, output=output, duration_ms=(time.time()-t0)*1000)
         except Exception as e:
             return ActionResult(success=False, error=str(e), duration_ms=(time.time()-t0)*1000)
