@@ -4,46 +4,50 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Optional
 from .models import *
+
 class LLMProvider:
-    """最简单的LLM调用封装"""
+    """最简单的LLM调用封装（支持多provider）"""
     
-    def __init__(self, model: str = "deepseek-chat"):
-        self.model = model
-        # 优先从config读·其次环境变量
-        self.api_key = self._load_key()
-        self.endpoint = "https://api.deepseek.com/v1/chat/completions"
-        self._available = bool(self.api_key)
-        self._last_usage: dict = {}  # 最近一次调用的token使用量
+    def __init__(self, model: str = None):
+        config = self._load_config()
+        
+        # 从config读取default_provider
+        default_provider = config.get("default_provider", "deepseek")
+        provider_cfg = config.get("providers", {}).get(default_provider, {})
+        
+        self.model = model or provider_cfg.get("model", "deepseek-chat")
+        self.endpoint = provider_cfg.get("endpoint", "https://api.deepseek.com/v1/chat/completions")
+        self.api_key = provider_cfg.get("api_key", "")
+        self._available = bool(self.api_key) or "localhost" in self.endpoint
+        self._last_usage: dict = {}
     
-    def _load_key(self) -> str:
-        """从config.json加载API key"""
+    def _load_config(self) -> dict:
+        """从config.json加载配置"""
         config_path = Path.home() / ".openllm" / "config.json"
         if config_path.exists():
             try:
                 with open(config_path) as f:
-                    cfg = json.load(f)
-                return cfg.get("providers", {}).get("deepseek", {}).get("api_key", "")
+                    return json.load(f)
             except:
                 pass
-        return os.environ.get("DEEPSEEK_API_KEY", "")
+        return {}
     
     def chat(self, messages: list[dict]) -> str:
-        """调LLM·返回文本。M0: 返回模拟响应。"""
+        """调LLM·返回文本。"""
         if not self._available:
-            # M0降级：返回模拟响应
             user_msg = messages[-1]["content"] if messages else ""
             self._last_usage = {}
             return f"[模拟LLM] 已收到: {user_msg[:50]}"
         
-        # TODO: Phase 2接入真实API
         try:
             import requests
+            headers = {"Content-Type": "application/json"}
+            if self.api_key and self.api_key != "lm-studio":
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            
             resp = requests.post(
                 self.endpoint,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers=headers,
                 json={
                     "model": self.model,
                     "messages": messages,
@@ -63,8 +67,3 @@ class LLMProvider:
             return data["choices"][0]["message"]["content"]
         except Exception as e:
             return f"[LLM错误] {e}"
-
-
-# ═══════════════════════════════════════════════════════
-# 五体（Stub · M0阶段用简单实现）
-# ═══════════════════════════════════════════════════════
