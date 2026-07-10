@@ -86,37 +86,6 @@ class IOS:
         from .ios_causal import learn_causal as _learn
         _learn(self, ctx, prediction, result, delta)
     
-    # ── Self-Harness Weakness Mining 工具 ──
-    
-    _MECHANISM_KEYWORDS = {
-        "tool_loop": ["重复", "循环", "loop", "retry", "反复", "无限"],
-        "missing_artifact": ["缺失", "没有生成", "未创建", "missing", "not found", "未产出"],
-        "wrong_format": ["格式错误", "format error", "解析失败", "parse error", "json解析", "语法错误"],
-        "dependency_missing": ["依赖缺失", "import error", "module not found", "package未安装", "ModuleNotFoundError"],
-        "timeout": ["超时", "timeout", "hang", "卡住", "无响应"],
-        "logic_error": ["逻辑错误", "条件错误", "判断错误", "分支错误", "错误结果", "断言失败"],
-        "permission": ["权限", "permission denied", "forbidden", "access denied"],
-        "state_corruption": ["脏数据", "不一致", "corrupt", "状态损坏"],
-        "exploration_loop": ["探索循环", "搜索失败", "盲目搜索", "找不到目标"],
-        "premature_success": ["过早完成", "提前结束", "未验证成功"],
-    }
-    
-    def _classify_mechanism(self, result: ActionResult, delta: CausalDelta) -> str:
-        """分类失败机制（Self-Harness failure signature mi）"""
-        text = (result.error or "") + " " + (result.output[:200] or "")
-        for mech, keywords in self._MECHANISM_KEYWORDS.items():
-            if any(kw in text for kw in keywords):
-                return mech
-        return "unknown" if not result.success else "success"
-    
-    def _classify_verifier_cause(self, result: ActionResult, delta: CausalDelta) -> str:
-        """分类verifier层面原因（Self-Harness failure signature ci）"""
-        if not result.success:
-            return "execution_error" if result.error else "unknown_failure"
-        if not delta.prediction_match:
-            return "prediction_mismatch"
-        return "success"
-    
     def _convert_governance(self, entry: dict, result: ActionResult):
         """Phase 8.5: 治理转换 — arXiv:2607.01087 核心循环
         
@@ -269,36 +238,6 @@ class IOS:
         from .ios_evolve import evolve as _evolve
         _evolve(self, proposal, critique, result, delta)
 
-    def _propose_harness_change(self, mechanism: str, support: int) -> str:
-        """Self-Harness Harness Proposal: 为高频失败机制生成五体配置修改建议
-        
-        不同mechanism映射到不同五体层的修改：
-        - tool_loop → ISN工具策略（限制重试次数）
-        - missing_artifact → ISN产出验证（完成后检查）
-        - exploration_loop → IO-S搜索约束（限制搜索轮次）
-        - premature_success → IO-S验证门控（声明成功前必须验证）
-        """
-        proposals = {
-            "tool_loop": f"ISN工具策略: 最大重试3次后切换方案（支持{support}次）",
-            "missing_artifact": f"ISN产出验证: 工具执行后检查产出物是否存在（支持{support}次）",
-            "wrong_format": f"ISN格式规范: 工具输出前做格式校验（支持{support}次）",
-            "dependency_missing": f"ISN依赖检查: 执行前检查依赖是否可用（支持{support}次）",
-            "timeout": f"IO-S超时策略: 设置工具执行超时上限（支持{support}次）",
-            "logic_error": f"ISA因果提示: 注入类似失败的教训到context（支持{support}次）",
-            "exploration_loop": f"IO-S搜索约束: 搜索不超过5轮后必须行动（支持{support}次）",
-            "premature_success": f"IO-S验证门控: 声明成功前必须执行验证步骤（支持{support}次）",
-        }
-        return proposals.get(mechanism, "")
-    
-    def _extract_common(self, texts: list[str]) -> list[str]:
-        """提取多段文本的共同词"""
-        if not texts:
-            return []
-        words_sets = [set(t.lower().split()) for t in texts if t]
-        if not words_sets:
-            return []
-        return list(set.intersection(*words_sets))[:5]
-    
     def recover(self, error: Exception) -> bool:
         """错误恢复"""
         print(f"  IO-S 错误恢复: {error}")
