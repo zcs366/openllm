@@ -456,7 +456,20 @@ class _LeftBrain:
         self.provider = LLMProvider()
     
     def predict(self, ctx: Context) -> Prediction:
-        """因果预测"""
+        """因果预测（v2·数学+LLM双路径）"""
+        # [进化] 数学预测：PredictionEngine纯计算
+        math_prediction = {"summary": "", "risk_signals": []}
+        try:
+            from ..iai.prediction import PredictionEngine
+            pe = PredictionEngine()
+            result = pe.predict_next({"user_message": ctx.user_message, "tools": ctx.tools})
+            if result:
+                math_prediction["summary"] = f"[数学] 预测类型={result.get('predicted_type','unknown')} 置信={result.get('confidence', 0):.2f}"
+                math_prediction["risk_signals"] = result.get("risk_signals", [])
+        except Exception:
+            pass
+        
+        # LLM预测：语义理解
         prompt = f"""你是openLLM的因果预测器。预测以下操作的后果。
 用户意图：{ctx.user_message}
 请预测：
@@ -472,11 +485,17 @@ class _LeftBrain:
         except:
             data = {"summary": resp[:50]}
         
+        # 合并数学+LLM预测
+        combined_summary = data.get("summary", resp[:50])
+        if math_prediction["summary"]:
+            combined_summary = f"{math_prediction['summary']} | [LLM] {combined_summary}"
+        combined_risks = list(set(data.get("risk_signals", []) + math_prediction["risk_signals"]))
+        
         return Prediction(
-            summary=data.get("summary", resp[:50]),
+            summary=combined_summary[:200],
             consequences=[data.get("summary", "")],
-            confidence=0.7,
-            risk_signals=data.get("risk_signals", []),
+            confidence=data.get("confidence", 0.7),
+            risk_signals=combined_risks,
         )
     
     def think(self, ctx: Context, prediction: Optional[Prediction] = None,
