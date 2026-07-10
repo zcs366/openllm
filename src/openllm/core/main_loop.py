@@ -1233,7 +1233,21 @@ class ISN:
             "search_files": self._search_files,
             "terminal": self._terminal,
         }
-        print(f"  ISN 工具执行就绪 · {len(self.tools)}个工具 · 沙箱={len(self.sandbox.allowed)}个允许路径 · 外部工具={len(self.bridge.discovered)}个")
+        # [进化] 接入ToolRegistry的verify-before-complete机制
+        try:
+            from ..tools.executor import ToolRegistry, ToolResult
+            self._tool_registry = ToolRegistry()
+            self._tool_registry.register("write_file", self._write_file_real,
+                                          description="写入文件（带验证）")
+            self._tool_registry.register("terminal", self._terminal_real,
+                                          description="执行Shell命令（带验证）")
+            # 设置verify hook：写操作前检查沙箱+治理规则
+            self._tool_registry.set_verify_hook(self._verify_before_complete)
+            self._has_verify = True
+        except Exception:
+            self._tool_registry = None
+            self._has_verify = False
+        print(f"  ISN 工具执行就绪 · {len(self.tools)}个工具 · 沙箱={len(self.sandbox.allowed)}个允许路径 · 外部工具={len(self.bridge.discovered)}个 · verify={'ON' if self._has_verify else 'OFF'}")
         # 加载已学习技能（血管#3: ios→isn）
         self.learned_skills: list[dict] = []
         self._load_learned_skills()
@@ -1403,6 +1417,44 @@ class ISN:
             return result.stdout[:3000] or result.stderr[:1000]
         except Exception as e:
             return f"[执行失败] {e}"
+    
+    # ── [进化] ToolRegistry verify hooks ──
+    
+    def _write_file_real(self, path: str, content: str) -> str:
+        """真实写入——ToolRegistry调用此方法"""
+        p = Path(path).expanduser().resolve()
+        if not self.sandbox.check_path(str(p), "write"):
+            return f"[沙箱拒绝] {self.sandbox.deny_reason(str(p))}"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return f"[写入成功] {path} ({len(content)}字符)"
+    
+    def _terminal_real(self, command: str) -> str:
+        """真实执行——ToolRegistry调用此方法"""
+        import subprocess
+        try:
+            result = subprocess.run(command, shell=True, capture_output=True,
+                                   text=True, timeout=30)
+            return result.stdout[:3000] or result.stderr[:1000]
+        except Exception as e:
+            return f"[执行失败] {e}"
+    
+    def _verify_before_complete(self, tool_name: str, **kwargs) -> dict:
+        """verify-before-complete钩子：写操作前的额外验证"""
+        # 沙箱检查
+        if tool_name == "write_file":
+            path = kwargs.get("path", "")
+            p = Path(path).expanduser().resolve()
+            if not self.sandbox.check_path(str(p), "write"):
+                return {"pass": False, "reason": f"沙箱拒绝: {self.sandbox.deny_reason(str(p))}"}
+        # 危险命令检查
+        if tool_name == "terminal":
+            command = kwargs.get("command", "")
+            dangerous = ["rm -rf", "sudo", "dd if=", "mkfs", "> /dev"]
+            for d in dangerous:
+                if d in command:
+                    return {"pass": False, "reason": f"危险命令: {d}"}
+        return {"pass": True, "reason": ""}
 
 
 class IKO:
