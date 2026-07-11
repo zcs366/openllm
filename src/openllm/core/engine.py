@@ -2,6 +2,9 @@
 
 Agent Loop + Provider + Tools + Memory + Identity + Security
 六维融为一个真正的对话Agent。
+
+懒加载集成函数已提取到 engine_integrations.py。
+工具执行管线已提取到 tool_executor.py。
 """
 
 import os
@@ -32,25 +35,15 @@ from .message_bus import MessageQueue
 from ..protocol import MessageType, BodyName
 
 
-def _lazy_import(module_path: Path, module_name: str):
-    """从指定路径懒加载模块，不污染sys.path。"""
-    import importlib.util
-    if not module_path.exists():
-        return None
-    try:
-        if module_path.is_dir():
-            spec = importlib.util.spec_from_file_location(
-                module_name, module_path / "__init__.py")
-        else:
-            spec = importlib.util.spec_from_file_location(
-                module_name, module_path)
-        if spec is None or spec.loader is None:
-            return None
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod
-    except Exception:
-        return None
+# ── 懒加载集成（已提取到 engine_integrations.py）──
+from .engine_integrations import (
+    lazy_import as _lazy_import,
+    get_checkpoint_manager as _get_checkpoint_manager,
+    get_isn_metadata as _get_isn_metadata,
+    get_isa_on_verify as _get_isa_on_verify,
+    get_iko_consume_trace as _get_iko_consume_trace,
+    get_isa_schema_matches as _get_isa_schema_matches,
+)
 from ..security.graceful_shutdown import GracefulShutdown
 from ..security.credential_firewall import CredentialFirewall
 from ..tools.executor import ToolRegistry, ToolResult, create_default_tools
@@ -68,161 +61,6 @@ from .display import DisplayEngine
 from .gateway import Gateway, CLIAdapter, StealthChannelAdapter
 
 logger = logging.getLogger("openllm.engine")
-
-# ── IO-S Checkpoint 集成（线程安全懒加载） ───────────
-_CHECKPOINT_MANAGER_INITIALIZED = False
-_CHECKPOINT_MANAGER_LOCK = threading.Lock()
-_CHECKPOINT_MANAGER: Optional["CheckpointManager"] = None
-
-def _get_checkpoint_manager():
-    """线程安全地获取 CheckpointManager 单例。懒加载。"""
-    global _CHECKPOINT_MANAGER_INITIALIZED, _CHECKPOINT_MANAGER
-    if _CHECKPOINT_MANAGER_INITIALIZED:
-        return _CHECKPOINT_MANAGER
-    with _CHECKPOINT_MANAGER_LOCK:
-        if _CHECKPOINT_MANAGER_INITIALIZED:
-            return _CHECKPOINT_MANAGER
-        io_s_path = Path.home() / "io-s"
-        if not io_s_path.exists():
-            logger.debug("IO-S 目录不存在，跳过 checkpoint")
-            _CHECKPOINT_MANAGER_INITIALIZED = True
-            _CHECKPOINT_MANAGER = None
-            return None
-        try:
-            _io_s_mod = _lazy_import(io_s_path / "syscall" / "checkpoint", "io_s_checkpoint")
-            if _io_s_mod and hasattr(_io_s_mod, 'CheckpointManager'):
-                _CHECKPOINT_MANAGER = _io_s_mod.CheckpointManager(interval=300, auto_start=False)
-            logger.info("✅ IO-S CheckpointManager 已加载")
-        except Exception as e:
-            logger.warning(f"IO-S Checkpoint 不可用: {e}")
-            _CHECKPOINT_MANAGER = None
-        _CHECKPOINT_MANAGER_INITIALIZED = True
-        return _CHECKPOINT_MANAGER
-
-# ── ISN 元数据集成（线程安全懒加载） ────────────────
-_ISN_METADATA_INITIALIZED = False
-_ISN_METADATA_LOCK = threading.Lock()
-_ISN_METADATA: list[dict] = []
-_ISN_METADATA_MAP: dict[str, dict] = {}
-
-def _get_isn_metadata() -> tuple[list[dict], dict[str, dict]]:
-    """线程安全地获取 ISN 工具元数据。懒加载。"""
-    global _ISN_METADATA_INITIALIZED, _ISN_METADATA, _ISN_METADATA_MAP
-    if _ISN_METADATA_INITIALIZED:
-        return _ISN_METADATA, _ISN_METADATA_MAP
-    with _ISN_METADATA_LOCK:
-        if _ISN_METADATA_INITIALIZED:
-            return _ISN_METADATA, _ISN_METADATA_MAP
-        isn_path = Path.home() / "isn"
-        if not isn_path.exists():
-            logger.debug("ISN 目录不存在，跳过元数据加载")
-            _ISN_METADATA_INITIALIZED = True
-            return _ISN_METADATA, _ISN_METADATA_MAP
-        try:
-            _isn_mod = _lazy_import(isn_path / "router" / "integration", "isn_integration")
-            if _isn_mod and hasattr(_isn_mod, 'export_tool_metadata'):
-                export_tool_metadata = _isn_mod.export_tool_metadata
-            _ISN_METADATA = export_tool_metadata()
-            _ISN_METADATA_MAP = {m["name"]: m for m in _ISN_METADATA}
-            logger.info(f"✅ ISN 元数据已加载: {len(_ISN_METADATA)} 条工具")
-        except Exception as e:
-            logger.warning(f"ISN 元数据不可用: {e}")
-            _ISN_METADATA = []
-            _ISN_METADATA_MAP = {}
-        _ISN_METADATA_INITIALIZED = True
-        return _ISN_METADATA, _ISN_METADATA_MAP
-
-# ── ISA 信念更新集成（线程安全懒加载） ──────────────
-_ISA_BELIEF_INITIALIZED = False
-_ISA_BELIEF_LOCK = threading.Lock()
-_ISA_ON_VERIFY = None
-
-def _get_isa_on_verify():
-    """线程安全地获取 ISA on_verify_result 回调。懒加载。"""
-    global _ISA_BELIEF_INITIALIZED, _ISA_ON_VERIFY
-    if _ISA_BELIEF_INITIALIZED:
-        return _ISA_ON_VERIFY
-    with _ISA_BELIEF_LOCK:
-        if _ISA_BELIEF_INITIALIZED:
-            return _ISA_ON_VERIFY
-        isa_path = Path.home() / "projects" / "isa"
-        if not isa_path.exists():
-            logger.debug("ISA 目录不存在，跳过信念更新")
-            _ISA_BELIEF_INITIALIZED = True
-            return None
-        try:
-            _isa_mod = _lazy_import(isa_path / "belief_update", "isa_belief_update")
-            if _isa_mod and hasattr(_isa_mod, 'on_verify_result'):
-                _ISA_ON_VERIFY = _isa_mod.on_verify_result
-            else:
-                _ISA_ON_VERIFY = None
-            logger.info("✅ ISA belief_update 已加载")
-        except Exception as e:
-            logger.warning(f"ISA belief_update 不可用: {e}")
-            _ISA_ON_VERIFY = None
-        _ISA_BELIEF_INITIALIZED = True
-        return _ISA_ON_VERIFY
-
-# ── IKO trace消费集成（线程安全懒加载） ──────────────
-_IKO_CONSUME_INITIALIZED = False
-_IKO_CONSUME_LOCK = threading.Lock()
-_IKO_CONSUME_TRACE = None
-
-def _get_iko_consume_trace():
-    """线程安全地获取 IKO consume_trace 回调。懒加载。"""
-    global _IKO_CONSUME_INITIALIZED, _IKO_CONSUME_TRACE
-    if _IKO_CONSUME_INITIALIZED:
-        return _IKO_CONSUME_TRACE
-    with _IKO_CONSUME_LOCK:
-        if _IKO_CONSUME_INITIALIZED:
-            return _IKO_CONSUME_TRACE
-        iko_path = Path.home() / "projects" / "iko"
-        if not iko_path.exists():
-            logger.debug("IKO 目录不存在，跳过trace消费")
-            _IKO_CONSUME_INITIALIZED = True
-            return None
-        try:
-            _iko_mod = _lazy_import(iko_path / "trace_consumer", "iko_trace_consumer")
-            if _iko_mod and hasattr(_iko_mod, 'consume_trace'):
-                _IKO_CONSUME_TRACE = _iko_mod.consume_trace
-            else:
-                _IKO_CONSUME_TRACE = None
-            logger.info("✅ IKO trace_consumer 已加载")
-        except Exception as e:
-            logger.warning(f"IKO trace_consumer 不可用: {e}")
-            _IKO_CONSUME_TRACE = None
-        _IKO_CONSUME_INITIALIZED = True
-        return _IKO_CONSUME_TRACE
-
-# ── ISA opinion_manager 集成（血管#5: IKO→ISA） ──────
-_ISA_OPINION_INITIALIZED = False
-_ISA_OPINION_LOCK = threading.Lock()
-_ISA_SCHEMA_MATCHES = None
-
-def _get_isa_schema_matches():
-    """线程安全地获取 ISA schema_matches 回调。懒加载。"""
-    global _ISA_OPINION_INITIALIZED, _ISA_SCHEMA_MATCHES
-    if _ISA_OPINION_INITIALIZED:
-        return _ISA_SCHEMA_MATCHES
-    with _ISA_OPINION_LOCK:
-        if _ISA_OPINION_INITIALIZED:
-            return _ISA_SCHEMA_MATCHES
-        isa_path = Path.home() / "projects" / "isa"
-        if not isa_path.exists():
-            _ISA_OPINION_INITIALIZED = True
-            return None
-        try:
-            _isa_mod2 = _lazy_import(isa_path / "opinion_manager", "isa_opinion_manager")
-            if _isa_mod2 and hasattr(_isa_mod2, 'schema_matches'):
-                _ISA_SCHEMA_MATCHES = _isa_mod2.schema_matches
-            else:
-                _ISA_SCHEMA_MATCHES = None
-            logger.info("✅ ISA opinion_manager.schema_matches 已加载")
-        except Exception as e:
-            logger.warning(f"ISA opinion_manager 不可用: {e}")
-            _ISA_SCHEMA_MATCHES = None
-        _ISA_OPINION_INITIALIZED = True
-        return _ISA_SCHEMA_MATCHES
 
 
 @dataclass
@@ -778,221 +616,23 @@ class OpenLLMEngine:
         raise RuntimeError(f"模型调用失败: {max_attempts}次重试后放弃")
 
     def execute_tool(self, tool_name: str, **kwargs) -> ToolResult:
-        """执行工具调用（带安全检查+verify钩子+三层管线）。"""
-        ok, reason = self.security.check_action(tool_name)
-        if not ok:
-            return ToolResult(tool_name=tool_name, success=False, error=reason)
-
-        # ── 血管 #3: ISN 风险检查 ──
-        risk_check = self._check_tool_risk(tool_name)
-        if not risk_check["pass"]:
-            return ToolResult(
-                tool_name=tool_name, success=False,
-                error=f"ISN风险检查未通过: {risk_check['reason']}"
-            )
-
-        # ── 三层安全管线（老IO-S pipeline） ──
-        try:
-            pipeline_result = self._run_pipeline(
-                input_text=str(kwargs)[:500],
-                source=tool_name,
-                llm_output="",
-                pid="engine",
-            )
-            if not pipeline_result.passed:
-                logger.warning(
-                    f"安全管线拦截 {tool_name}: "
-                    f"confidence={pipeline_result.confidence}, "
-                    f"alerts={pipeline_result.alerts}")
-                return ToolResult(
-                    tool_name=tool_name, success=False,
-                    error=f"安全管线拦截: {pipeline_result.alerts}")
-        except ImportError:
-            # pipeline模块不可用——跳过（降级模式）
-            logger.info(f"安全管线不可用，跳过 {tool_name} 安全检查")
-        except Exception as e:
-            # 安全管线异常——必须记录且向上报告，不能静默
-            logger.error(f"安全管线异常 {tool_name}: {e}")
-            return ToolResult(
-                tool_name=tool_name, success=False,
-                error=f"安全管线异常: {e}")
-
-        # ── IOS拒绝检查（安全管线之后、参数验证之前） ──
-        try:
-            from .governance_engine import GovernanceEngine
-            gov = GovernanceEngine()
-            # 高风险指令自动拒绝（ISN critical级别）
-            if risk_check.get("level") == "critical":
-                rejection = gov.reject(
-                    instruction=tool_name,
-                    reason=f"ISN标记为critical级别工具: {tool_name}",
-                    belief_confidence=0.95,
-                )
-                return ToolResult(
-                    tool_name=tool_name, success=False,
-                    error=f"IOS拒绝: {rejection.reason}")
-        except Exception as e:
-            logger.debug(f"IOS拒绝检查跳过: {e}")
-
-        # ── verify钩子：调用前参数验证 ──
-        param_check = self._verify_tool_params(tool_name, **kwargs)
-        if not param_check["pass"]:
-            return ToolResult(
-                tool_name=tool_name, success=False,
-                error=f"参数验证未通过: {param_check['reason']}"
-            )
-
-        result = self.tools.execute(tool_name, **kwargs)
-
-        # P2: 凭据防火墙——扫描工具输出
-        if result.output:
-            result.output = self.firewall.scan_text(result.output)
-        if result.error:
-            result.error = self.firewall.scan_text(result.error)
-
-        # ── verify钩子：调用后结果验证 ──
-        result_check = self._verify_tool_result(tool_name, result)
-        if not result_check["pass"]:
-            logger.warning(f"结果验证未通过: {tool_name}: {result_check['reason']}")
-
-        # ── 血管 #2: ISA 信念更新（verify → opinion 置信度） ──
-        verdict = "pass" if result.success and result_check["pass"] else "fail"
-        self.bus.publish(
-            MessageType.GOVERNANCE_EVENT,
-            source=BodyName.IOS, target=BodyName.ISA,
-            payload={
-                "tool_name": tool_name,
-                "params": kwargs,
-                "result": {"output": result.output[:500], "error": result.error},
-                "verdict": verdict,
-            },
-        )
-
-        # ── 血管 #4: IKO trace消费（工具调用→结构化trace） ──
-        self.bus.publish(
-            MessageType.OBSERVABILITY_LOG,
-            source=BodyName.IOS, target=BodyName.IKO,
-            payload={
-                "type": "verify_pass" if result.success else "verify_fail",
-                "tool_name": tool_name,
-                "params": {k: str(v)[:100] for k, v in kwargs.items()},
-                "verdict": "pass" if result.success else "fail",
-                "timestamp": time.time(),
-            },
-        )
-
-        # ── 血管 #5: IKO→ISA 反馈闭环（schema验证→质量信号） ──
-        if result.success:
-            self.bus.publish(
-                MessageType.DECISION_RESULT,
-                source=BodyName.IKO, target=BodyName.ISA,
-                payload={
-                    "success": True,
-                    "output": result.output[:1000],
-                    "error": result.error,
-                },
-            )
-
-        return result
+        """执行工具调用（委托给tool_executor.py）。"""
+        from .tool_executor import execute_tool as _exec
+        return _exec(self, tool_name, **kwargs)
 
     # ── hindsight↔verify联动 ─────────────────────
 
     def execute_tool_with_hindsight(self, tool_name: str, pid: str = "",
                                     goal: str = "", **kwargs) -> ToolResult:
-        """执行工具 + verify验证 + hindsight经验自动提取。
-
-        三步一体化：
-          1. execute_tool()（含verify钩子）
-          2. 提取verify结果
-          3. 写入hindsight经验（含验证状态、负面案例标记）
-
-        Args:
-            tool_name: 工具名称
-            pid: 进程ID（用于hindsight分类）
-            goal: 原始目标（用于hindsight理解上下文）
-            **kwargs: 工具参数
-        """
-        result = self.execute_tool(tool_name, **kwargs)
-
-        # 提取verify结果
-        verify_pass = result.success
-        verify_reason = ""
-        if result.success:
-            v = self._verify_tool_result(tool_name, result)
-            verify_pass = v["pass"]
-            verify_reason = v["reason"]
-        elif result.error:
-            verify_reason = result.error
-
-        # ── Phase 8: Failure Signature 提取 ──
-        if not verify_pass and verify_reason:
-            ctx = {"user_input": goal[:200] if goal else ""}
-            sig = self.failure_tracker.extract_signature(tool_name, verify_reason, ctx)
-            evolve_hint = self.failure_tracker.learn_causal(sig)
-            if evolve_hint:
-                logger.info(f"  Phase 8: {evolve_hint}")
-                # Phase 9: 检查是否触发进化
-                if self.failure_tracker.should_evolve():
-                    proposals = self.failure_tracker.evolve()
-                    for p in proposals:
-                        logger.warning(
-                            f"  Phase 9 进化提案: [{p.proposal_type}] "
-                            f"{p.description} (置信度={p.confidence:.0%})"
-                        )
-
-        # 更新loop的工具成功/失败状态（供路由器使用）
-        self.loop._last_tool_success = verify_pass
-
-        # 如果有任务上下文，自动提取hindsight经验
-        if pid and goal:
-            try:
-                from .hindsight_loop import extract_hindsight
-
-                hindsight_data = extract_hindsight(
-                    pid=pid,
-                    goal=goal[:200],
-                    result={
-                        "success": verify_pass,
-                        "execution_time": result.latency_ms / 1000.0,
-                        "token_count": 0,
-                    },
-                    failure=verify_reason if not verify_pass else ""
-                )
-
-                # 写入verify结果到hindsight经验文件
-                verify_record = {
-                    "tool": tool_name,
-                    "verify_pass": verify_pass,
-                    "verify_reason": verify_reason,
-                    "hindsight": hindsight_data,
-                    "timestamp": time.time(),
-                }
-                hindsight_dir = Path.home() / ".io-s" / "hindsight"
-                hindsight_dir.mkdir(parents=True, exist_ok=True)
-                verify_path = hindsight_dir / f"verify_{pid}_{int(time.time())}.json"
-                verify_path.write_text(json.dumps(verify_record, ensure_ascii=False))
-
-                # 清理旧 verify 文件，最多保留 MAX_VERIFY_FILES 个
-                self._trim_verify_files(hindsight_dir, self.MAX_VERIFY_FILES)
-
-                logger.info(
-                    f"  hindsight+verify: {pid}.{tool_name} "
-                    f"{'PASS' if verify_pass else 'FAIL'}"
-                )
-            except Exception as e:
-                logger.debug(f"hindsight提取跳过: {e}")
-
-        return result
+        """执行工具+verify+hindsight（委托给tool_executor.py）。"""
+        from .tool_executor import execute_tool_with_hindsight as _exec_h
+        return _exec_h(self, tool_name, pid=pid, goal=goal, **kwargs)
 
     @classmethod
     def _trim_verify_files(cls, directory: Path, max_files: int):
-        """清理旧 verify 文件，只保留最近的 max_files 个。"""
-        if not directory.exists():
-            return
-        files = sorted(directory.glob("verify_*.json"))
-        if len(files) > max_files:
-            for f in files[:-max_files]:
-                f.unlink()
+        """清理旧verify文件（委托给tool_executor.py）。"""
+        from .tool_executor import _trim_verify_files as _trim
+        _trim(directory, max_files)
 
     def _trim_history(self):
         """限制 history 长度，保留 system prompt + 最近 N 轮对话。"""
