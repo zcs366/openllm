@@ -1,7 +1,7 @@
 """
 openLLM Agent心跳执行 — 从main_loop.py提取的_execute_tick
 
-11阶段心跳：listen→context→replay→predict→governance→risk→reason→arbitrate→execute→feedback
+12阶段心跳：listen→context→search→replay→predict→governance→risk→reason→arbitrate→execute→feedback
 
 数据契约：HeartbeatContext（protocol.py）
 - 感知层写：identity, memory, search_results, prediction, left_proposal, right_critique
@@ -16,7 +16,7 @@ from .protocol import HeartbeatContext
 
 
 def execute_tick(agent, msg: Message):
-    """一次完整的11阶段心跳（从Agent._execute_tick提取）
+    """一次完整的12阶段心跳（从Agent._execute_tick提取）
     
     数据流通过HeartbeatContext：
     Phase 1-2:  感知层写 → hc.identity, hc.memory, hc.search_results
