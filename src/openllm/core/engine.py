@@ -255,28 +255,16 @@ class OpenLLMEngine:
     # ── P0: 启动安全审计 ────────────────────────────
 
     def _startup_audit(self):
-        """启动安全审计（不阻塞，不抛异常）。"""
-        try:
-            from ..security.startup_audit import run_startup_audit
-            report = run_startup_audit()
-            # 只在有警告/失败时输出
-            if "❌" in report or "⚠️" in report:
-                print(report)
-        except Exception as e:
-            logger.debug(f"启动审计跳过: {e}")
+        """启动安全审计（委托engine_utils）。"""
+        from .engine_utils import startup_audit
+        startup_audit()
 
     # ── P1: 一次性LLM调用（不走agent循环） ────────
 
     def _get_api_key(self) -> str:
-        """获取当前provider的API key。"""
-        p = self.config.provider
-        if p == "ollama":
-            return "ollama"
-        elif p == "anthropic":
-            return os.environ.get("ANTHROPIC_API_KEY", "")
-        elif p == "gemini":
-            return os.environ.get("GEMINI_API_KEY", "")
-        return os.environ.get("DEEPSEEK_API_KEY", "")
+        """获取API key（委托engine_utils）。"""
+        from .engine_utils import get_api_key
+        return get_api_key(self.config.provider)
 
     def oneshot(self, prompt: str, system: str = "你是一个有帮助的助手。",
                 temperature: float = 0.3, max_tokens: int = 1024) -> str:
@@ -336,85 +324,21 @@ class OpenLLMEngine:
             logger.warning(f"checkpoint恢复失败: {e}")
             return False
 
-    # ── verify钩子 ─────────────────────────────────────
+    # ── verify钩子（委托tool_validator.py） ──────────
 
-    _TOOL_PARAM_SCHEMAS = {
-        "read_file": {"required": ["path"], "check": None},
-        "write_file": {"required": ["path", "content"], "check": None},
-        "shell": {"required": ["command"], "check": None},
-        "search": {"required": ["pattern"], "check": None},
-        "list_dir": {"required": [], "check": None},
-        "python_exec": {"required": ["code"], "check": None},
-        "octopus_search": {"required": ["query"], "check": None},
-        "octopus_self_model": {"required": [], "check": None},
-    }
+    _TOOL_PARAM_SCHEMAS = {}  # 委托给tool_validator.TOOL_PARAM_SCHEMAS
 
     def _verify_tool_params(self, tool_name: str, **kwargs) -> dict:
-        """工具调用前参数验证（规则引擎，零LLM）。"""
-        schema = self._TOOL_PARAM_SCHEMAS.get(tool_name)
-        if not schema:
-            return {"pass": True, "reason": "无schema验证"}
-        for req in schema["required"]:
-            if req not in kwargs or kwargs[req] is None:
-                return {"pass": False, "reason": f"缺少必填参数: {req}"}
-            val = kwargs[req]
-            if isinstance(val, str) and len(val) == 0:
-                return {"pass": False, "reason": f"参数{req}为空字符串"}
-        # 安全检查：Shell注入检测（正则+上下文感知）
-        if tool_name == "shell":
-            cmd = kwargs.get("command", "")
-            # 危险模式白名单：支持变体（空格、制表符）
-            dangerous_patterns = [
-                (r'\brm\s+[-/][^;]*\brf\b', "rm -rf 删除操作"),
-                (r'\bsudo\s', "sudo 提权操作"),
-                (r'\bdestro[y5]\s+', "破坏性命令"),
-                (r'>\s*/dev/(sda|sdb|sdc|nvme|mmcblk)', "磁盘写入"),
-                (r'\bmkf[sz]\s', "格式化操作"),
-                (r'\bdd\s+if=\s*/dev/', "dd 磁盘写入"),
-                (r':\(\)\s*\{', "fork炸弹"),
-                (r'\b(?:curl|wget)\s+.*?\|', "下载并执行"),
-                (r'\bchmod\s+777\s', "权限放开"),
-                (r'exec\s+.*[;<`]', "exec 执行注入"),
-            ]
-            for pattern, reason in dangerous_patterns:
-                if re.search(pattern, cmd):
-                    return {"pass": False, "reason": f"Shell命令包含危险模式: {reason}"}
-        return {"pass": True, "reason": ""}
+        from .tool_validator import verify_tool_params
+        return verify_tool_params(tool_name, **self._TOOL_PARAM_SCHEMAS, **kwargs)
 
     def _verify_tool_result(self, tool_name: str, result: ToolResult) -> dict:
-        """工具调用后结果验证。"""
-        if not result.success:
-            return {"pass": False, "reason": f"工具执行失败: {result.error}"}
-        if not result.output:
-            return {"pass": True, "reason": "成功（无输出）"}
-        if len(result.output) > 100000:
-            return {"pass": False, "reason": f"输出过长({len(result.output)}字节)，需截断"}
-        return {"pass": True, "reason": ""}
-
-    # ── ISN 风险检查（血管 #3: ISN→IO-S） ────────────
-
-    RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
-    DEFAULT_MAX_RISK = "high"
+        from .tool_validator import verify_tool_result
+        return verify_tool_result(tool_name, result)
 
     def _check_tool_risk(self, tool_name: str) -> dict:
-        """检查工具的 ISN 风险等级。
-
-        Returns: {"pass": bool, "reason": str, "risk_level": str}
-        """
-        _, meta_map = _get_isn_metadata()
-        if not meta_map:
-            return {"pass": True, "reason": "ISN元数据未加载", "risk_level": "unknown"}
-
-        tool_meta = meta_map.get(tool_name)
-        if not tool_meta:
-            return {"pass": True, "reason": f"工具'{tool_name}'不在ISN索引中", "risk_level": "unknown"}
-
-        risk = tool_meta.get("risk_level", "low")
-        max_risk = self.DEFAULT_MAX_RISK
-        if self.RISK_ORDER.get(risk, 0) > self.RISK_ORDER.get(max_risk, 0):
-            return {"pass": False, "reason": f"风险等级'{risk}'超过允许上限'{max_risk}'", "risk_level": risk}
-
-        return {"pass": True, "reason": "", "risk_level": risk}
+        from .tool_validator import check_tool_risk
+        return check_tool_risk(tool_name)
 
     def wake(self) -> str:
         """苏醒：加载记忆+重建身份+恢复运行态。"""
@@ -492,23 +416,9 @@ class OpenLLMEngine:
         return "\n".join(lines)
 
     def _build_system_prompt(self, identity: str, mem_ctx: dict) -> str:
-        """构建完整system prompt。"""
-        parts = [identity]
-
-        # 工具描述
-        tools_list = self.tools.list_tools()
-        if tools_list:
-            parts.append("\n## 可用工具")
-            for t in tools_list:
-                parts.append(f"- {t['name']}: {t['description']}")
-
-        # 记忆
-        if mem_ctx.get("status") != "empty":
-            decisions = mem_ctx.get("decisions", [])
-            if decisions:
-                parts.append(f"\n## 上次决策\n" + "; ".join(decisions[:3]))
-
-        return "\n".join(parts)
+        """构建system prompt（委托engine_utils）。"""
+        from .engine_utils import build_system_prompt
+        return build_system_prompt(self.tools.list_tools(), identity, mem_ctx)
 
     def chat(self, user_input: str, stream: bool = True) -> str:
         """
@@ -635,15 +545,11 @@ class OpenLLMEngine:
         _trim(directory, max_files)
 
     def _trim_history(self):
-        """限制 history 长度，保留 system prompt + 最近 N 轮对话。"""
-        if len(self._history) <= 1:
-            return
-        # 保留 system prompt (索引 0) + 最近 MAX_HISTORY_TURNS 轮
-        system = [self._history[0]] if self._history[0].role == "system" else []
-        recent = self._history[-self.MAX_HISTORY_TURNS * 2:]  # user + assistant 各半
-        old_count = len(self._history)
-        self._history = system + recent
-        logger.debug(f"History trimmed: {old_count} → {len(self._history)}")
+        """限制history长度（委托engine_utils）。"""
+        from .engine_utils import trim_history
+        result = trim_history(self._history, self.MAX_HISTORY_TURNS)
+        if result is not None:
+            self._history = result
 
     def sleep(self) -> str:
         """休眠：写Delta胶囊+检查点+保存审计+flush异步记忆+状态转DORMANT。"""

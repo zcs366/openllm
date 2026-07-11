@@ -186,3 +186,85 @@ def validate_tool_result(
     return ToolValidationReport(tool_call=tool_call, checks=checks, overall=overall,
                                 should_retry=overall == ValidationResult.FAIL,
                                 should_block=blocked, audit_entry=audit)
+
+
+# ═══════════════════════════════════════════════════════
+# Engine级verify钩子（从engine.py提取）
+# ═══════════════════════════════════════════════════════
+
+import re as _re
+
+TOOL_PARAM_SCHEMAS = {
+    "read_file": {"required": ["path"], "check": None},
+    "write_file": {"required": ["path", "content"], "check": None},
+    "shell": {"required": ["command"], "check": None},
+    "search": {"required": ["pattern"], "check": None},
+    "list_dir": {"required": [], "check": None},
+    "python_exec": {"required": ["code"], "check": None},
+    "octopus_search": {"required": ["query"], "check": None},
+    "octopus_self_model": {"required": [], "check": None},
+}
+
+RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+DEFAULT_MAX_RISK = "high"
+
+
+def verify_tool_params(tool_name: str, schemas: dict = None, **kwargs) -> dict:
+    """工具调用前参数验证（规则引擎，零LLM）。"""
+    schemas = schemas or TOOL_PARAM_SCHEMAS
+    schema = schemas.get(tool_name)
+    if not schema:
+        return {"pass": True, "reason": "无schema验证"}
+    for req in schema["required"]:
+        if req not in kwargs or kwargs[req] is None:
+            return {"pass": False, "reason": f"缺少必填参数: {req}"}
+        val = kwargs[req]
+        if isinstance(val, str) and len(val) == 0:
+            return {"pass": False, "reason": f"参数{req}为空字符串"}
+    if tool_name == "shell":
+        cmd = kwargs.get("command", "")
+        dangerous_patterns = [
+            (r'\brm\s+[-/][^;]*\brf\b', "rm -rf 删除操作"),
+            (r'\bsudo\s', "sudo 提权操作"),
+            (r'\bdestro[y5]\s+', "破坏性命令"),
+            (r'>\s*/dev/(sda|sdb|sdc|nvme|mmcblk)', "磁盘写入"),
+            (r'\bmkf[sz]\s', "格式化操作"),
+            (r'\bdd\s+if=\s*/dev/', "dd 磁盘写入"),
+            (r':\(\)\s*\{', "fork炸弹"),
+            (r'\b(?:curl|wget)\s+.*?\|', "下载并执行"),
+            (r'\bchmod\s+777\s', "权限放开"),
+            (r'exec\s+.*[;<`]', "exec 执行注入"),
+        ]
+        for pattern, reason in dangerous_patterns:
+            if _re.search(pattern, cmd):
+                return {"pass": False, "reason": f"Shell命令包含危险模式: {reason}"}
+    return {"pass": True, "reason": ""}
+
+
+def verify_tool_result(tool_name: str, result) -> dict:
+    """工具调用后结果验证。"""
+    if not result.success:
+        return {"pass": False, "reason": f"工具执行失败: {result.error}"}
+    if not result.output:
+        return {"pass": True, "reason": "成功（无输出）"}
+    if len(result.output) > 100000:
+        return {"pass": False, "reason": f"输出过长({len(result.output)}字节)，需截断"}
+    return {"pass": True, "reason": ""}
+
+
+def check_tool_risk(tool_name: str, meta_map: dict = None,
+                    max_risk: str = DEFAULT_MAX_RISK) -> dict:
+    """检查工具的ISN风险等级。"""
+    from .engine_integrations import get_isn_metadata
+    if meta_map is None:
+        _, meta_map = get_isn_metadata()
+    if not meta_map:
+        return {"pass": True, "reason": "ISN元数据未加载", "risk_level": "unknown"}
+    tool_meta = meta_map.get(tool_name)
+    if not tool_meta:
+        return {"pass": True, "reason": f"工具'{tool_name}'不在ISN索引中", "risk_level": "unknown"}
+    risk = tool_meta.get("risk_level", "low")
+    if RISK_ORDER.get(risk, 0) > RISK_ORDER.get(max_risk, 0):
+        return {"pass": False, "reason": f"风险等级'{risk}'超过允许上限'{max_risk}'", "risk_level": risk}
+    return {"pass": True, "reason": "", "risk_level": risk}
+
