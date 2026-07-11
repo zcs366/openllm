@@ -45,6 +45,7 @@ class TestBoundedMemoryEnforcer(unittest.TestCase):
         editor._cumulative_tokens = 0
         editor._turn_count = 0
         editor._injection_history = []
+        editor._content_lengths = []  # P1-1: 注入长度基线数据
         return editor
 
     def test_budget_profiles(self):
@@ -125,7 +126,7 @@ class TestBoundedMemoryEnforcer(unittest.TestCase):
         )
 
         compressed = editor._emergency_compress(real_result)
-        self.assertIn("ISA紧急压缩", compressed.content)
+        self.assertIn("近期记忆摘要", compressed.content)
         self.assertIn("ISA记忆系统设计", compressed.content)
 
     def test_record_injection(self):
