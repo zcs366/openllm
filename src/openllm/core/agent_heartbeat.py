@@ -52,6 +52,27 @@ def execute_tick(agent, msg: Message):
         turn.trace_phase("context", "ok", duration_ms=(time.time()-t1)*1000)
         agent.iko.trace("context", "ok")
         
+        # ── Phase 2.25: search (感知层·章鱼搜索) ──
+        try:
+            index_brain = agent.octopus.tentacles.get("index")
+            if index_brain:
+                # 构建索引（首次调用时）
+                if not index_brain.index:
+                    index_brain.build()
+                # 搜索
+                search_results = index_brain.search(msg.text, limit=5)
+                if search_results:
+                    ctx.search_results = getattr(ctx, 'search_results', []) or []
+                    for r in search_results:
+                        ctx.search_results.append(
+                            f"[search:{r.get('filepath','?')}] {r.get('snippet','')}")
+                    hc.search_results = ctx.search_results
+                    turn.trace_phase("search", "ok",
+                                     detail=f"found:{len(search_results)}")
+                    agent.iko.trace("search", "ok")
+        except Exception as e:
+            turn.trace_phase("search", "skip", detail=str(e)[:100])
+
         # ── Phase 2.5: evidence replay (感知层) ──
         try:
             from ..memory.evidence_replay import create_replay_for_context
