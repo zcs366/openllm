@@ -29,6 +29,14 @@ OpenLLM 是一个 AI经验积累系统——一个能从交互经验中学习、
 | 搜索 | 章鱼 (RECALL + jiak cards) | 记忆检索 |
 | 安全 | 5级权限门 + 审计日志 | 治理层 |
 
+### 1.3 生态位置
+
+OpenLLM 不是单一工具，而是一套 **AI Agent 架构体系**的枢纽——围绕"造人不造工具"这一命题，生长出一组独立可用、彼此咬合的开源子项目：记忆系统 [ISA](https://github.com/zcs366/isa)、技能系统 [ISN](https://github.com/zcs366/isn)、输出系统 [IKO](https://github.com/zcs366/iko)、知识研究 [izu](https://github.com/zcs366/izu)、语言压缩理论实验 [iat](https://github.com/zcs366/iat)、Δ胶囊记忆 [openllm-memory](https://github.com/zcs366/openllm-memory)。
+
+在这个生态里，OpenLLM 是脊椎，ISA/ISN/IKO 是器官：不把 LLM 当函数调用，而是给它造一副身体——记忆、治理、技能、输出四体，由五条血管贯通。
+
+**与主流 Agent 框架的分野**：LangChain / CrewAI 等把记忆、治理、技能当作可插拔的"插件"；OpenLLM 的立场是，这三者是 Agent 的**身体**，应当与主循环同构、与身份同源。对研究 Agent 记忆 / 治理 / 技能基础设施的开发者，这套代码提供端到端可运行、逐行可审计的参考实现——从七步安全流水线，到 Δ胶囊的"选择性遗忘"（温度引擎决定什么该记住、什么该忘掉）。
+
 ---
 
 ## 2. 架构
