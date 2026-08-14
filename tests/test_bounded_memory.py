@@ -1,31 +1,65 @@
-"""BoundedMemoryContract 测试 — PAL P1-1
+"""
+BoundedMemoryContract 测试 — PAL P1-1
 2026-07-07
 
 ⚠️ 外部依赖测试: 本测试通过 sys.path 引用 ~/.hermes/jiak/scripts/isa_context_editor.py。
 BoundedMemoryContract 的源码不在 openllm 项目内，属于 jiak 工具库。
 测试使用 __new__() + mock 绕过依赖（jieba/context_router），验证预算逻辑。
 验证目标: 预算模式/选择性遗忘/紧急压缩算法，非 openllm 集成。
+
+⚠️ 2026-08-14 修复（T-ISA-7根因）：mock和sys.path操作原本在**模块级**执行——
+pytest收集阶段import本文件时，jieba被全局替换为MagicMock，污染所有后续测试
+（jieba.cut返回空→cosine=0→test_e2e_mistake_causal失败）。
+现移入setUpModule/tearDownModule：本模块测试运行时才mock，运行完恢复现场，模块级零污染。
 """
 import unittest
 from unittest.mock import MagicMock, patch
 from dataclasses import dataclass
 
-# Mock the dependencies before importing
 import sys
 import os
 
-# Create mock modules
-mock_jieba = MagicMock()
-sys.modules['jieba'] = mock_jieba
-sys.modules['jieba.analyse'] = mock_jieba.analyse
+# 模块级只留惰性占位，mock+import在setUpModule执行
+ISAContextEditor = None
+InjectionResult = None
+MemoryCandidate = None
+TopicPrediction = None
 
-# Mock context_router
-mock_cr = MagicMock()
-sys.modules['context_router'] = mock_cr
+_ORIG_SYS_MODULES = {}
+_ORIG_SYS_PATH = None
 
-# Now import the module
-sys.path.insert(0, os.path.expanduser("~/.hermes/jiak/scripts"))
-from isa_context_editor import ISAContextEditor, InjectionResult, MemoryCandidate, TopicPrediction
+
+def setUpModule():
+    """本模块测试运行前：mock依赖+import isa_context_editor（临时污染，teardown恢复）。"""
+    global ISAContextEditor, InjectionResult, MemoryCandidate, TopicPrediction
+    global _ORIG_SYS_PATH
+    _ORIG_SYS_PATH = list(sys.path)
+
+    mock_jieba = MagicMock()
+    _ORIG_SYS_MODULES['jieba'] = sys.modules.get('jieba')
+    _ORIG_SYS_MODULES['jieba.analyse'] = sys.modules.get('jieba.analyse')
+    _ORIG_SYS_MODULES['context_router'] = sys.modules.get('context_router')
+    sys.modules['jieba'] = mock_jieba
+    sys.modules['jieba.analyse'] = mock_jieba.analyse
+    sys.modules['context_router'] = MagicMock()
+
+    sys.path.insert(0, os.path.expanduser("~/.hermes/jiak/scripts"))
+    try:
+        from isa_context_editor import ISAContextEditor, InjectionResult, MemoryCandidate, TopicPrediction
+    except ImportError as e:
+        # 依赖不可用时跳过本模块（不error，不影响其他测试）
+        raise unittest.SkipTest(f"isa_context_editor不可用: {e}")
+
+
+def tearDownModule():
+    """本模块测试运行后：恢复被mock的模块和sys.path（防止污染其他测试）。"""
+    for name, orig in _ORIG_SYS_MODULES.items():
+        if orig is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = orig
+    if _ORIG_SYS_PATH is not None:
+        sys.path[:] = _ORIG_SYS_PATH
 
 
 class TestBoundedMemoryEnforcer(unittest.TestCase):
@@ -156,3 +190,4 @@ class TestBoundedMemoryEnforcer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -33,10 +33,19 @@ class PredictionEngine(BaseEventEmitter):
 
     @staticmethod
     def _encode(data: dict) -> list[float]:
-        """将 dict 编码为固定维度向量。纯哈希，无 LLM。"""
+        """将 dict 编码为固定维度向量。纯哈希，无 LLM。
+
+        2026-08-14修复：原用内置hash()（PYTHONHASHSEED随机化，字符串hash
+        跨进程不稳定）→ test_different_contexts_positive_error偶发失败
+        （两段不同文本碰巧hash到同一idx）。改用zlib.crc32确定性哈希。
+        """
+        def _stable_hash(s: str) -> int:
+            import zlib
+            return zlib.crc32(s.encode("utf-8"))
+
         vec = [0.0] * PredictionEngine.VECTOR_DIM
         for i, (k, v) in enumerate(data.items()):
-            idx = hash(k) % PredictionEngine.VECTOR_DIM
+            idx = _stable_hash(k) % PredictionEngine.VECTOR_DIM
             if isinstance(v, (int, float)):
                 vec[idx] += float(v)
             elif isinstance(v, str):
@@ -46,7 +55,7 @@ class PredictionEngine(BaseEventEmitter):
             elif isinstance(v, (list, tuple)):
                 vec[idx] += len(v) * 0.5
             else:
-                vec[idx] += hash(str(v)) % 100 / 100.0
+                vec[idx] += _stable_hash(str(v)) % 100 / 100.0
         # L2 归一化
         norm = math.sqrt(sum(x * x for x in vec)) or 1.0
         return [x / norm for x in vec]
