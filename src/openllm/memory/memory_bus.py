@@ -105,37 +105,32 @@ def calc_temperature(
 ) -> float:
     """
     增强温度计算（集成到MemoryBus）。
-    
-    T = importance × e^(-λ_eff × t) + heat × (1 + log(1 + access_count))
-    
-    λ_eff根据tags自动选择：
-    - insight/决策: 0.001（几乎永存）
-    - fact/事实: 0.01（正常衰减）
-    - noise/噪声: 0.05（快速衰减）
-    - habit/习惯: 0.005（慢衰减）
-    - 默认: 0.01
+
+    委托给temperature_engine.calculate_temperature（T-ISA-6统一双实现）。
+    保留签名兼容：tags→memory_type映射，heat参数兼容（access热度）。
     """
-    t = time.time() - last_accessed
-    
-    # 动态λ
-    if decay_lambda is None:
-        tag_set = set(tg.lower() for tg in (tags or []))
-        if "insight" in tag_set or "决策" in tag_set:
-            decay_lambda = 0.001
-        elif "fact" in tag_set or "事实" in tag_set:
-            decay_lambda = 0.01
-        elif "noise" in tag_set or "噪声" in tag_set:
-            decay_lambda = 0.05
-        elif "habit" in tag_set or "习惯" in tag_set:
-            decay_lambda = 0.005
-        else:
-            decay_lambda = 0.01
-    
-    # 酒神双杯：访问次数调制heat
-    heat_adj = heat * (1 + math.log(1 + access_count))
-    
-    base = importance * math.exp(-decay_lambda * t)
-    return base + heat_adj
+    # tags → memory_type 映射（保持向后兼容的λ语义）
+    tag_set = set(tg.lower() for tg in (tags or []))
+    if "preference" in tag_set or "偏好" in tag_set:
+        memory_type = "preference"
+    elif "event" in tag_set or "事件" in tag_set:
+        memory_type = "event"
+    elif "noise" in tag_set or "噪声" in tag_set:
+        memory_type = "noise"
+    else:
+        memory_type = "insight"
+
+    from .temperature_engine import calculate_temperature as _calc, BASE_HEAT
+    days = max(0, int((time.time() - last_accessed) / 86400)) if last_accessed else 0
+    # 外部heat参数（历史调用）转为等效access_count：heat=BASE_HEAT/(1+access*0.1)
+    if heat > 0 and access_count == 0:
+        access_count = int(max(0, (BASE_HEAT / heat - 1) * 10))
+    return _calc(
+        importance=importance,
+        days_since_access=days,
+        memory_type=memory_type,
+        access_count=access_count,
+    )
 
 
 @dataclass

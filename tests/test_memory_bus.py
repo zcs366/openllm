@@ -394,9 +394,11 @@ def test_calc_temperature():
     t_noise = calc_temperature(1.0, now, tags=["noise"])
     # 刚创建时差异小，但λ不同
     
-    # 酒神双杯测试
-    t_hot = calc_temperature(1.0, now, heat=0.5, access_count=10)
-    t_cold = calc_temperature(1.0, now, heat=0.5, access_count=0)
+    # 酒神双杯测试（T-ISA-6更新）：access通过emotion_factor影响衰减速率。
+    # days=0时无衰减可影响（hot≈cold），days=30时热记忆（被反复访问）衰减更慢→温度更高。
+    now30 = now - 30 * 86400
+    t_hot = calc_temperature(1.0, now30, heat=0.5, access_count=10)
+    t_cold = calc_temperature(1.0, now30, heat=0.5, access_count=0)
     assert t_hot > t_cold, f"热记忆应比冷记忆温度高: hot={t_hot}, cold={t_cold}"
     
     # 显式λ覆盖

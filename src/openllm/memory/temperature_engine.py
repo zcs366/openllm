@@ -34,7 +34,7 @@ LAMBDA_MAP = {
     "noise": 0.5,          # 噪声：极速衰减
 }
 
-BASE_HEAT = 3.0
+BASE_HEAT = 0.1  # 遗忘基准热度（T-ISA-6: 3.0→0.1）。3.0使所有记忆温度≥3.0>阈值0.3，遗忘形同虚设；0.1保留新记忆最小热度（实测18候选0新卡误杀）
 MAX_TEMP = 10.0
 
 # 因果效应参与遗忘决策：因果记忆的温度加成（跟BASE_HEAT同级）
@@ -205,8 +205,12 @@ def scan_for_eviction(
     capsule_dir: str = "~/.openllm/capsules",
     threshold: float = EVICT_THRESHOLD,
     max_scan: int = 2000,
+    archive: bool = False,
 ) -> list:
     """扫描所有v06胶囊，找出温度低于阈值的淘汰候选。
+
+    T-ISA-6增强：archive=True时把候选文件移入 <capsule_dir>/archive/（只归档不删除），
+    默认False只扫描列出（安全，不移动任何文件）。
 
     Returns:
         [{"session_id": str, "file": str, "temperature": float,
@@ -237,7 +241,10 @@ def scan_for_eviction(
                     importance = float(meta["importance"])
                 if "access_count" in meta:
                     access_count = int(meta["access_count"])
-            days = max(0, (time.time() - ts) / 86400) if ts else 999
+            # T-ISA-6修复：ts缺失时回退文件mtime（旧逻辑→999天误杀新卡）
+            if not ts:
+                ts = f.stat().st_mtime
+            days = max(0, (time.time() - ts) / 86400) if ts else 0
             temp = calculate_temperature(importance, int(days), "insight", access_count)
             state = temperature_state(temp)
             if should_evict(temp):
@@ -255,4 +262,22 @@ def scan_for_eviction(
 
     # 按温度升序排列（最冷的先淘汰）
     evictable.sort(key=lambda x: x["temperature"])
+
+    # T-ISA-6：只归档不删除（移动到archive子目录，保留可恢复）
+    if archive and evictable:
+        archive_dir = cap_dir / "archive"
+        archive_dir.mkdir(exist_ok=True)
+        archived = 0
+        for cand in evictable:
+            src = cap_dir / cand["file"]
+            dst = archive_dir / cand["file"]
+            if src.exists() and not dst.exists():
+                try:
+                    src.rename(dst)
+                    cand["archived_to"] = str(dst)
+                    archived += 1
+                except OSError:
+                    pass
+        evictable.append({"archived_count": archived})
+
     return evictable
