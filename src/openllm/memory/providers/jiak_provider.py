@@ -43,6 +43,19 @@ class JiakProvider:
     def priority(self) -> int:
         return 0  # 最优先
 
+    @property
+    def input_schema(self) -> set:
+        """search()使用的Query字段"""
+        return {"text", "top_k", "min_importance", "min_temperature",
+                "record_types", "sources", "token_budget"}
+
+    @property
+    def output_schema(self) -> set:
+        """search()产出的MemoryRecord字段"""
+        return {"record_id", "content", "source", "record_type",
+                "importance", "temperature", "trust_level",
+                "tags", "timestamp", "context", "score", "provider"}
+
     def search(self, query: Query) -> List[MemoryRecord]:
         """从jiak卡片中检索"""
         index = self._load_index()

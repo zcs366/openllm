@@ -40,6 +40,18 @@ class CausalProvider:
     def priority(self) -> int:
         return 20
 
+    @property
+    def input_schema(self) -> set:
+        """search()使用的Query字段"""
+        return {"text", "top_k", "min_importance", "token_budget"}
+
+    @property
+    def output_schema(self) -> set:
+        """search()产出的MemoryRecord字段"""
+        return {"record_id", "content", "source", "record_type",
+                "importance", "temperature", "trust_level",
+                "tags", "timestamp", "context", "score", "provider"}
+
     def _ensure_store(self):
         """延迟初始化CausalMemoryStore"""
         if self._store is None:
@@ -77,18 +89,16 @@ class CausalProvider:
             if not content:
                 continue
 
-            # score = confidence × (1 + log(frequency))
-            confidence = getattr(cr, "prediction_confidence", 0.5)
-            frequency = getattr(cr, "frequency", 1)
-            score = confidence * (1 + math.log(max(frequency, 1)))
+            # 因果效应参与遗忘决策：按temperature排序，让因果温度参与检索
+            score = cr.temperature() if hasattr(cr, "temperature") else 0.5
 
             record = MemoryRecord(
                 record_id=getattr(cr, "memory_id", f"causal:{hash(content)}"),
                 content=content,
                 source="causal",
                 record_type="lesson",
-                importance=confidence,
-                temperature=0.8,  # 因果记忆温度衰减慢
+                importance=getattr(cr, "prediction_confidence", score),
+                temperature=round(score, 4),  # 因果效应参与遗忘决策：用实际温度
                 trust_level=getattr(cr, "trust_level", "internal").value
                     if hasattr(getattr(cr, "trust_level", ""), "value")
                     else str(getattr(cr, "trust_level", "internal")),

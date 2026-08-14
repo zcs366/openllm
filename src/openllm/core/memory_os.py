@@ -37,18 +37,22 @@ class MemoryEntry:
         """是否过期。"""
         return time.time() - self.created_at > self.ttl
     
-    def temperature(self, decay_lambda: float = 0.01) -> float:
+    def temperature(self, decay_lambda: float = 0.01, causal_delta: float = 0.0) -> float:
         """
         计算记忆温度。
         
-        T = imp × e^(-λt) + heat
+        T = imp × e^(-λt) + heat + causal_delta × 3.0
+        
+        因果效应参与遗忘决策：causal_delta越大=教训越深=温度越高。
         
         Args:
             decay_lambda: 衰减系数
+            causal_delta: 因果效应权重(0-1)，默认0不影响现有调用
         """
         t = time.time() - self.last_accessed
         base = self.importance * math.exp(-decay_lambda * t)
-        return base + self.heat
+        # 因果效应参与遗忘决策：causal_delta × CAUSAL_BONUS
+        return base + self.heat + causal_delta * 3.0
 
 
 class MemoryOS:

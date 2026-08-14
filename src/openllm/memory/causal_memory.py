@@ -95,12 +95,15 @@ class CausalMemory:
             self.memory_id = hashlib.sha256(raw.encode()).hexdigest()[:12]
     
     def temperature(self, decay_lambda: float = 0.01) -> float:
-        """温度计算——兼容现有ISA温度函数"""
+        """温度计算——因果记忆的温度 = 时间衰减 + 因果效应加成。
+        
+        因果效应参与遗忘决策：delta越大=教训越深=越不该忘。
+        高delta_magnitude的记忆获得额外温度保护，衰减更慢。
+        """
         t = time.time() - self.last_accessed
         base = self.importance * math.exp(-decay_lambda * t)
-        # 高delta_magnitude的记忆衰减更快（教训已过时或场景不同）
-        delta_penalty = 1.0 - (self.delta_magnitude * 0.3)
-        return max(0.0, base * delta_penalty)
+        # 因果效应参与遗忘决策：delta_magnitude越大=教训越深=温度越高
+        return max(0.0, base + self.delta_magnitude * 3.0)
     
     def relevance_score(self, query_features: List[str]) -> float:
         """

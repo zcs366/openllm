@@ -39,6 +39,18 @@ class UnifiedProvider:
     def priority(self) -> int:
         return 40  # 最低优先级（兜底）
 
+    @property
+    def input_schema(self) -> set:
+        """search()使用的Query字段"""
+        return {"text", "top_k", "min_importance", "record_types", "token_budget"}
+
+    @property
+    def output_schema(self) -> set:
+        """search()产出的MemoryRecord字段"""
+        return {"record_id", "content", "source", "record_type",
+                "importance", "temperature", "trust_level",
+                "tags", "timestamp", "context", "score", "provider"}
+
     def _ensure_memory(self):
         """延迟初始化UnifiedMemory"""
         if self._memory is None:

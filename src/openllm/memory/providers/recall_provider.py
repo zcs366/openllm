@@ -63,6 +63,18 @@ class RecallProvider:
     def priority(self) -> int:
         return 10
 
+    @property
+    def input_schema(self) -> set:
+        """search()使用的Query字段"""
+        return {"text", "top_k", "min_importance", "record_types", "token_budget"}
+
+    @property
+    def output_schema(self) -> set:
+        """search()产出的MemoryRecord字段"""
+        return {"record_id", "content", "source", "record_type",
+                "importance", "temperature", "trust_level",
+                "tags", "timestamp", "context", "score", "provider"}
+
     def search(self, query: Query) -> List[MemoryRecord]:
         """从RECALL记录中检索"""
         records = self._load_records()

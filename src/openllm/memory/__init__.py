@@ -3,6 +3,7 @@ from .capsule import MemoryOS, TextCapsule, DeltaCapsule, MemoryLayers, Arbitrat
 from .unified_memory import UnifiedMemory, create_unified_memory
 from .evidence_replay import EvidenceReplay, EvidenceSpan, ReplayResult, create_replay_for_context
 from .memory_bus import MemoryBus, MemoryRecord, WriteRequest, WriteResult, Query
+from .auto_causal_writer import AutoCausalWriter
 
 __all__ = [
     "MemoryOS", 
@@ -22,4 +23,5 @@ __all__ = [
     "WriteRequest",
     "WriteResult",
     "Query",
+    "AutoCausalWriter",
 ]

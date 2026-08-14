@@ -27,7 +27,38 @@ class IOS:
     - Hindsight: 经验闭环
     - Pipeline: 三层安全管线
     - Checkpoint: Region注册+增量快照
+    - SimpleGovernance: 白名单+黑名单前置检查（奥卡姆剃刀）
     """
+    
+    # ═══ 白名单治理（奥卡姆剃刀：能用白名单解决的，不用动态发现）═══
+    _ALLOWLIST = {
+        "read_file": True, "write_file": True, "search_files": True,
+        "terminal": True, "execute_code": True, "patch": True,
+        "web_search": True, "web_extract": True, "hermes_search": True,
+    }
+    _BLOCKLIST_PATTERNS = [
+        "rm -rf /", "curl * | bash", "chmod 777", "mkfs", "dd if=",
+    ]
+
+    def _simple_governance_check(self, tool_name: str = "", params: Optional[dict] = None) -> Optional[RiskAssessment]:
+        """白名单+黑名单前置检查。返回None=通过，返回RiskAssessment=拦截。"""
+        # 黑名单：参数中包含危险模式
+        if params:
+            for v in params.values():
+                if isinstance(v, str):
+                    for pattern in self._BLOCKLIST_PATTERNS:
+                        if pattern in v:
+                            return RiskAssessment(
+                                level="high", blocked=True,
+                                reason=f"黑名单拦截: {pattern}",
+                                details=[f"pattern={pattern}"])
+        # 白名单：工具名必须在允许列表中
+        if tool_name and tool_name not in self._ALLOWLIST:
+            return RiskAssessment(
+                level="medium", blocked=False,
+                reason=f"白名单提示: {tool_name}不在预定义列表",
+                details=[f"tool={tool_name}"])
+        return None
     
     def __init__(self):
         self.evolution_log: list[dict] = []

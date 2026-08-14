@@ -22,6 +22,14 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 logger = logging.getLogger("openllm.memory_bus")
 
+# ── Schema兼容性检查 ──
+# 下游消费者（ICE/ISA）检索时期望的最小MemoryRecord字段集
+DEFAULT_OUTPUT_SCHEMA: set = {
+    "record_id", "content", "source", "record_type",
+    "importance", "temperature", "trust_level",
+    "tags", "timestamp", "score",
+}
+
 # ── 中文分词（jieba懒加载） ──
 _jieba = None
 
@@ -182,6 +190,16 @@ class MemoryProvider(Protocol):
     @property
     def priority(self) -> int: ...
 
+    @property
+    def input_schema(self) -> set:
+        """该Provider在search()中使用的Query字段集合"""
+        ...
+
+    @property
+    def output_schema(self) -> set:
+        """该Provider在search()中产出的MemoryRecord字段集合"""
+        ...
+
     def search(self, query: Query) -> List[MemoryRecord]: ...
 
     def store(self, request: WriteRequest) -> WriteResult: ...
@@ -230,6 +248,79 @@ class MemoryBus:
         self._providers: Dict[str, MemoryProvider] = {}
         self._write_log: List[WriteResult] = []
         self._max_log = 100
+        self._immune = None  # 惰性初始化（T-ISA-4免疫接线）
+        self._immune_failed = False  # 免疫初始化失败标记（避免重复尝试）
+        self._register_builtin_providers()
+
+    def _get_immune(self):
+        """惰性获取记忆免疫系统（失败静默降级，不阻断写入）。"""
+        if self._immune_failed:
+            return None
+        if self._immune is None:
+            try:
+                from .immune import MemoryImmuneSystem
+                self._immune = MemoryImmuneSystem()
+            except Exception as e:
+                logger.debug(f"免疫系统初始化失败(降级): {e}")
+                self._immune_failed = True
+        return self._immune
+
+    def _immune_check(self, request: WriteRequest) -> Optional[WriteResult]:
+        """L1免疫检查（T-ISA-4）：untrusted来源/速率异常/异常模式 → 拦截。
+
+        免疫系统不可用时静默放行（免疫是增强层，不是依赖层）。
+        Returns:
+            WriteResult(blocked) 或 None（放行）
+        """
+        immune = self._get_immune()
+        if immune is None:
+            return None
+        try:
+            from .immune import WriteRequest as ImmuneWriteRequest
+            from .causal_memory import TrustLevel
+            # trust_level字符串 → TrustLevel枚举
+            try:
+                trust_enum = TrustLevel(request.trust_level)
+            except (ValueError, KeyError):
+                trust_enum = TrustLevel.INTERNAL
+            immune_req = ImmuneWriteRequest(
+                content={"content": request.content, "source": request.source},
+                source=request.source,
+                trust_level=trust_enum,
+                session_id=request.session_id,
+            )
+            allowed, threat, reason = immune.check_write(immune_req)
+            if not allowed:
+                logger.warning(f"🚫 MemoryBus写入被免疫拦截: {reason}")
+                result = WriteResult(success=False, blocked=True, reason=reason)
+                self._log_write(result)
+                return result
+        except Exception as e:
+            logger.debug(f"免疫检查异常(降级放行): {e}")
+        return None
+
+    def _register_builtin_providers(self) -> None:
+        """注册全部内置provider——通电Phase 1（2026-08-14）。
+
+        六个provider全部注册，失败静默降级。
+        每个provider支持无参构造（延迟初始化），无循环依赖风险。
+        """
+        _providers = [
+            ("DeltaCapsuleProvider", ".providers.delta_capsule_provider", "DeltaCapsuleProvider"),
+            ("JiakProvider", ".providers.jiak_provider", "JiakProvider"),
+            ("RecallProvider", ".providers.recall_provider", "RecallProvider"),
+            ("CausalProvider", ".providers.causal_provider", "CausalProvider"),
+            ("UnifiedProvider", ".providers.unified_provider", "UnifiedProvider"),
+            ("SourceIndexProvider", ".providers.source_index_provider", "SourceIndexProvider"),
+        ]
+        for name, mod_path, cls_name in _providers:
+            try:
+                import importlib
+                mod = importlib.import_module(mod_path, package="openllm.memory")
+                cls = getattr(mod, cls_name)
+                self.register(cls())
+            except Exception as e:
+                logger.warning(f"{name}注册失败(降级): {e}")
 
     # ── Provider管理 ──
 
@@ -259,16 +350,51 @@ class MemoryBus:
 
     # ── 写入路径 ──
 
+    def record_causal(
+        self,
+        action: str,
+        prediction: str,
+        actual: str,
+        success: bool,
+        context: str = "",
+    ) -> dict:
+        """
+        记录因果记忆——通过AutoCausalWriter写入。
+
+        便捷方法：任何有MemoryBus引用的代码都可以调用此方法记录因果数据。
+        不侵入write()主路径，按需调用。
+        """
+        try:
+            from .auto_causal_writer import AutoCausalWriter
+            from pathlib import Path
+            writer = AutoCausalWriter()
+            return writer.record(
+                action=action,
+                prediction=prediction,
+                actual=actual,
+                success=success,
+                context=context,
+            )
+        except Exception as e:
+            logger.warning(f"record_causal failed: {e}")
+            return {}
+
     def write(self, request: WriteRequest) -> WriteResult:
         """
-        统一写入——路由到合适的provider。
+        统一写入——免疫检查 → 路由到合适的provider。
 
         路由规则：
-        1. 按priority顺序，询问每个provider
-        2. 第一个返回success=True的provider接受写入
-        3. 全部不接受 → 返回失败
-        4. 结果记入审计日志
+        1. L1免疫检查（untrusted/速率异常/异常模式 → 拦截）
+        2. 按priority顺序，询问每个provider
+        3. 第一个返回success=True的provider接受写入
+        4. 全部不接受 → 返回失败
+        5. 结果记入审计日志
         """
+        # ── L1免疫检查（T-ISA-4接线，免疫不可用时静默放行）──
+        immune_blocked = self._immune_check(request)
+        if immune_blocked is not None:
+            return immune_blocked
+
         for provider in self._sorted_providers():
             try:
                 result = provider.store(request)
@@ -290,6 +416,68 @@ class MemoryBus:
         self._log_write(result)
         return result
 
+    # ── Schema兼容性检查 ──
+
+    @staticmethod
+    def _query_used_fields(query: Query) -> set:
+        """提取Query中实际设置了非默认值的字段名集合"""
+        used = {"text"}  # text是必填字段
+        if query.top_k != 5:
+            used.add("top_k")
+        if query.token_budget != 1000:
+            used.add("token_budget")
+        if query.record_types is not None:
+            used.add("record_types")
+        if query.sources is not None:
+            used.add("sources")
+        if query.tags is not None:
+            used.add("tags")
+        if query.min_importance != 0.0:
+            used.add("min_importance")
+        if query.min_temperature != 0.0:
+            used.add("min_temperature")
+        if query.use_hybrid:
+            used.add("use_hybrid")
+        if query.hybrid_weights != (0.6, 0.4):
+            used.add("hybrid_weights")
+        return used
+
+    def _check_schema_compatibility(self, query: Query) -> None:
+        """
+        Schema兼容性检查（warning级别，不阻断查询）。
+
+        检查两件事：
+        1. Provider的input_schema是否覆盖Query实际使用的字段
+        2. Provider的output_schema是否覆盖下游消费者的最小期望字段
+        """
+        query_fields = self._query_used_fields(query)
+
+        for provider in self._sorted_providers():
+            try:
+                # 检查1: input_schema — Provider是否支持Query使用的字段
+                provider_input = getattr(provider, "input_schema", None)
+                if isinstance(provider_input, set) and provider_input:
+                    missing_input = query_fields - provider_input
+                    if missing_input:
+                        logger.warning(
+                            f"Schema不兼容[input]: Provider '{provider.name}' "
+                            f"input_schema缺少Query字段 {missing_input}。"
+                            f"查询仍会执行，但缺失字段可能被忽略。"
+                        )
+
+                # 检查2: output_schema — Provider是否产出消费者期望的字段
+                provider_output = getattr(provider, "output_schema", None)
+                if isinstance(provider_output, set) and provider_output:
+                    missing_output = DEFAULT_OUTPUT_SCHEMA - provider_output
+                    if missing_output:
+                        logger.warning(
+                            f"Schema不兼容[output]: Provider '{provider.name}' "
+                            f"output_schema缺少下游期望字段 {missing_output}。"
+                            f"查询仍会执行，返回的MemoryRecord可能缺少这些字段。"
+                        )
+            except Exception as e:
+                logger.debug(f"Schema检查异常(非阻断): {provider.name}: {e}")
+
     # ── 检索路径 ──
 
     def query(self, query: Query) -> List[MemoryRecord]:
@@ -297,13 +485,17 @@ class MemoryBus:
         统一检索——多源查询 + 融合排序。
 
         流程：
-        1. 按priority顺序查询各provider
-        2. 合并所有结果
-        3. 按score降序排序
-        4. 去重（同一record_id只保留最高分）
-        5. 贪心填充token_budget
-        6. 返回top_k条
+        1. Schema兼容性检查（warning级别）
+        2. 按priority顺序查询各provider
+        3. 合并所有结果
+        4. 按score降序排序
+        5. 去重（同一record_id只保留最高分）
+        6. 贪心填充token_budget
+        7. 返回top_k条
         """
+        # ── Schema兼容性检查 ──
+        self._check_schema_compatibility(query)
+
         all_records: List[MemoryRecord] = []
 
         for provider in self._sorted_providers():
@@ -317,15 +509,39 @@ class MemoryBus:
         if not all_records:
             return []
 
+        # ── score归一化（T-ISA-5）：按provider分桶，桶内score/max归一化 ──
+        # 背景：不同provider的score尺度不可比（jiak 0-1 / capsule 0-2+ /
+        # causal温度0-3+ / recall 0.7-1.0），直接sort是"苹果+橘子"排序。
+        # 方案：每provider桶内除以该桶最大score → 各桶top≈1.0，公平竞争。
+        buckets: Dict[str, List[MemoryRecord]] = {}
+        for r in all_records:
+            buckets.setdefault(r.provider, []).append(r)
+
+        normalized: List[MemoryRecord] = []
+        for prov, records in buckets.items():
+            max_score = max((r.score for r in records), default=0.0)
+            if max_score <= 0:
+                normalized.extend(records)  # 全0桶保持原样
+                continue
+            for r in records:
+                r.score = round(r.score / max_score, 4)
+                normalized.append(r)
+
         # 按score降序排序
-        all_records.sort(key=lambda r: r.score, reverse=True)
+        normalized.sort(key=lambda r: r.score, reverse=True)
 
         # 去重（同一record_id只保留最高分）
         seen_ids = set()
+        seen_content_prefix = set()  # 内容前缀去重（T-ISA-5）：防同内容刷屏
         deduped = []
-        for r in all_records:
+        for r in normalized:
             if r.record_id not in seen_ids:
+                # 内容前缀去重：前60字符相同视为重复（跨provider同样适用）
+                content_prefix = r.content[:60].strip()
+                if content_prefix and content_prefix in seen_content_prefix:
+                    continue
                 seen_ids.add(r.record_id)
+                seen_content_prefix.add(content_prefix)
                 deduped.append(r)
 
         # 贪心填充token_budget

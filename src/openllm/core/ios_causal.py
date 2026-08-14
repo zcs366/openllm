@@ -104,6 +104,23 @@ def learn_causal(ios, ctx: Context, prediction: Prediction,
         except Exception as e:
             print(f"  learn_causal_adapter failed (non-fatal): {e}")
 
+    # 通电Phase 1c: AutoCausalWriter桥接 — 让因果数据流入CausalMemoryStore
+    # MemoryBus通过CausalProvider检索因果记忆，但CausalMemoryStore只有6条数据。
+    # 原因：learn_causal写到causal_memory.jsonl，没写到CausalMemoryStore。
+    # 这一行桥接两个数据流。
+    try:
+        from ..memory.auto_causal_writer import AutoCausalWriter
+        writer = AutoCausalWriter()
+        writer.record(
+            action=entry.get("action", ""),
+            prediction=entry.get("prediction", ""),
+            actual=entry.get("actual", ""),
+            success=result.success,
+            context=entry.get("mechanism", ""),
+        )
+    except Exception:
+        pass  # AutoCausalWriter不可用时静默降级
+
 
 def _classify_mechanism(result: ActionResult, delta: CausalDelta) -> str:
     """分类失败机制"""

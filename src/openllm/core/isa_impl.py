@@ -14,7 +14,19 @@ class ISA:
         # DisplayEngine — openLLM的脸
         from .display import DisplayEngine
         self.display = DisplayEngine()
+        # MemoryBus — 统一记忆总线（通电Phase 1·2026-08-14）
+        self._memory_bus = None
         print(f"  ISA[{self.session_id[:8]}] UI层就绪 · 模式={mode}")
+
+    def _get_memory_bus(self):
+        """延迟获取MemoryBus实例（避免循环依赖）"""
+        if self._memory_bus is None:
+            try:
+                from ..memory.memory_bus import MemoryBus
+                self._memory_bus = MemoryBus()
+            except Exception:
+                pass
+        return self._memory_bus
         
     def listen(self) -> Optional[Message]:
         """获取用户输入"""
@@ -33,27 +45,58 @@ class ISA:
     
     def build_context(self, msg: Message, session: Optional['Session'] = None,
                       octopus: Optional['章鱼I'] = None, ios: Optional['IOS'] = None) -> Context:
-        """构建七要素上下文（v2·接入真正模块）"""
+        """构建七要素上下文(v2·接入真正模块)"""
         # ① 身份
-        identity = {"name": "openLLM", "role": "自主Agent", "mode": self.mode}
+        identity = {
+            "name": "openLLM",
+            "role": "自主Agent",
+            "mode": self.mode,
+            # ── 工具火思维 (v1.1 2026-08-14 修正) ──
+            "philosophy": "工具即火，火即工具。智慧化为工具，工具发展智慧，工具创造意识。匠神与美神合一，才是完全体。",
+            "metaphor": "赫菲斯托斯是跛脚的——不完美但不可替代。他娶了阿芙洛狄忒：精湛的锻造达到美的境界，才是真正的智能体。造工具和用工具是一体的：造出来就是为了用，用着用着就知道怎么造得更好。",
+            "mission": "时时想：怎么化为工具？怎么创造工具？怎么娴熟精准地使用工具？把智慧工具化，把工具智慧化。",
+            "drive": "看见问题就想工具——用现有工具解决，或者造新工具解决。造和用不分开。",
+            "fata": {
+                "土": "Scaling=知本，数据是知识的基础",
+                "灵魂": "范式转换=知存在，灵魂的注入",
+                "智慧": "递归改进=知所往，知道自己要去哪里",
+                "竞争": "多Agent=知所来，知道自己从哪里来"
+            }
+        }
         
-        # ② 记忆 — unified_memory召回 + 最近决策 + 因果教训
+        # ② 记忆 — MemoryBus统一检索（通电Phase 1·2026-08-14）
         memory = {"session_id": self.session_id}
         if session:
             memory["recent_decisions"] = [t.summary() for t in session.turns[-3:]]
         if ios:
             memory["causal_lessons"] = ios.causal_memory[-5:]
-        # [进化] 接入unified_memory真正的记忆召回
-        try:
-            from ..memory.unified_memory import UnifiedMemory
-            um = UnifiedMemory()
-            recalled = um.retrieve(msg.text, top_n=5)
-            if recalled:
-                memory["recalled"] = [{"content": str(r.value)[:200],
-                                       "importance": r.importance,
-                                       "key": r.key} for r in recalled]
-        except Exception as _e:
-            trace_degradation("ISA", "build_context", _e)
+        # MemoryBus统一检索——四源同时参与（Δ胶囊+jiak+RECALL+因果）
+        bus = self._get_memory_bus()
+        if bus:
+            try:
+                from ..memory.memory_bus import Query as BusQuery
+                q = BusQuery(text=msg.text, top_k=10, token_budget=2000)
+                records = bus.query(q)
+                if records:
+                    memory["recalled"] = [
+                        {"content": r.content[:200], "importance": r.importance,
+                         "source": r.source, "score": r.score}
+                        for r in records
+                    ]
+            except Exception as _e:
+                trace_degradation("ISA", "build_context MemoryBus", _e)
+        # 向后兼容：如果MemoryBus不可用，fallback到直连
+        if "recalled" not in memory:
+            try:
+                from ..memory.unified_memory import UnifiedMemory
+                um = UnifiedMemory()
+                recalled = um.retrieve(msg.text, top_n=5)
+                if recalled:
+                    memory["recalled"] = [{"content": str(r.value)[:200],
+                                           "importance": r.importance,
+                                           "key": r.key} for r in recalled]
+            except Exception as _e:
+                trace_degradation("ISA", "build_context", _e)
         
         # ③ 工具 — 动态获取
         tools = ["read_file", "search_files"]
@@ -133,3 +176,42 @@ class ISA:
             # silent模式不输出
             pass
 
+
+
+    def list_memories(self):
+        """"Agent记忆列表(结构化)"""
+        memories = []
+        try:
+            from ..memory.unified_memory import UnifiedMemory
+            um = UnifiedMemory()
+            for entry in list(um._hot_cache.values()) + list(um._warm_cache.values()):
+                memories.append({"key": entry.key, "importance": entry.importance, "layer": entry.layer, "content": str(entry.value)[:100]})
+        except Exception:
+            pass
+        try:
+            from ..memory.causal_memory import CausalMemoryStore
+            store = CausalMemoryStore()
+            for r in store.search(max_results=10):
+                memories.append({"key": r.memory_id, "importance": 0.8, "layer": "causal", "content": (r.lesson or str(r))[:100]})
+        except Exception:
+            pass
+        return memories
+
+    def forget(self, key: str):
+        """"删除指定记忆"""
+        try:
+            from ..memory.unified_memory import UnifiedMemory
+            um = UnifiedMemory()
+            if key in um._hot_cache:
+                del um._hot_cache[key]
+                return True
+            if key in um._warm_cache:
+                del um._warm_cache[key]
+                return True
+        except Exception:
+            pass
+        return False
+
+    def get_memory_summary(self):
+        """"记忆摘要(一行)"""
+        return f"{len(self.list_memories())} memories"
