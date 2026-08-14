@@ -71,6 +71,53 @@ def test_evict_dry_run():
     # 允许已存在的deleted（历史），但本次dry-run不应新增
 
 
+def test_evict_new_card_not_candidate():
+    """回归测试（T-ISA-7 evict bug）：今天创建的新卡不应成为淘汰候选。
+
+    旧bug：last_accessed缺失 → age=999天 → 所有新卡误判为陈旧
+    （实测27候选全是当天创建）。修复：缺失回退created，仍无则age=0。
+    """
+    cid = f"test-lifecycle-newcard-{uuid.uuid4().hex[:6]}"
+    _make_temp_card(cid, ["kw1"], ["new note"])  # last_accessed=0, created=now
+    try:
+        ev = jl.evict(dry_run=True)
+        candidate_ids = [c["card_id"] for c in ev.get("candidates", [])]
+        assert cid not in candidate_ids, f"新卡被误判为淘汰候选: {candidate_ids}"
+    finally:
+        _cleanup([cid])
+
+
+def test_evict_old_stale_card_candidate():
+    """回归测试：90天以上未访问的低价值卡应成为候选。"""
+    import time
+    cid = f"test-lifecycle-oldcard-{uuid.uuid4().hex[:6]}"
+    # 构造老卡：created=100天前, access_count=0, importance=0.3
+    card = {
+        "card_id": cid,
+        "title": f"test {cid}",
+        "keywords": ["kw1"],
+        "summary": "old stale card",
+        "notes": [],
+        "decisions": [],
+        "status": "active",
+        "importance": 0.3,
+        "memory_type": "test",
+        "confidence": 0.5,
+        "confidence_reason": "test",
+        "immutable": False,
+        "last_accessed": 0,
+        "access_count": 0,
+        "created": time.time() - 100 * 86400,  # 100天前
+    }
+    jl.write(cid, card, written_by="test_jiak_lifecycle")
+    try:
+        ev = jl.evict(dry_run=True)
+        candidate_ids = [c["card_id"] for c in ev.get("candidates", [])]
+        assert cid in candidate_ids, f"老卡未被识别为候选: {candidate_ids}"
+    finally:
+        _cleanup([cid])
+
+
 def test_revise_versioned():
     """revise：版本化修正+历史存档。"""
     cid = f"test-lifecycle-revise-{uuid.uuid4().hex[:6]}"

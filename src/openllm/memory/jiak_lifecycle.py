@@ -305,8 +305,28 @@ def evict(
                 ).timestamp()
             except (ValueError, TypeError):
                 last_access = 0
-        age_days = (now - last_access) / 86400 if last_access else 999
+        # 修复（T-ISA-7 evict bug）：last_accessed缺失时回退created，
+        # 仍无则age=0（新卡不淘汰）。旧逻辑 last_access=0→age=999
+        # 会把所有新卡误判为陈旧（实测27候选全是今天创建）。
+        ref_ts = last_access or card.get("created", 0) or 0
+        if isinstance(ref_ts, str):
+            try:
+                from datetime import datetime, timezone
+                ref_ts = datetime.fromisoformat(
+                    ref_ts.replace("Z", "+00:00")
+                ).timestamp()
+            except (ValueError, TypeError):
+                ref_ts = 0
+        age_days = (now - ref_ts) / 86400 if ref_ts else 0.0
+        # 年龄为负（时钟偏移）视为0
+        if age_days < 0:
+            age_days = 0.0
         access_count = card.get("access_count", 0) or 0
+        if isinstance(access_count, str):
+            try:
+                access_count = int(access_count)
+            except (ValueError, TypeError):
+                access_count = 0
 
         is_cold = decay in ("cooling", "archived", "cold", "frozen", "evictable")
         is_stale = access_count <= 1 and age_days > 90
