@@ -45,10 +45,22 @@ def _make_temp_card(card_id: str, keywords: list, notes: list, **extra) -> dict:
 
 
 def _cleanup(card_ids: list):
+    """清理测试临时卡。加固：unlink时若文件被软删除逻辑重写（deleted标记），
+    直接删除物理文件；并对测试前缀做glob兜底，防残留污染后续测试。"""
     for cid in card_ids:
         p = CARDS_DIR / f"{cid}.json"
         if p.exists():
-            p.unlink()
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    # glob兜底：清理所有测试前缀卡（防上次中断残留）
+    for prefix in ("test-lifecycle-", "test-mbu-"):
+        for p in CARDS_DIR.glob(f"{prefix}*.json"):
+            try:
+                p.unlink()
+            except OSError:
+                pass
 
 
 def test_find_similar():

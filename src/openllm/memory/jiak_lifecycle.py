@@ -25,8 +25,24 @@ from typing import Dict, List, Optional
 
 # ── jiak_api 导入（Hermes jiak 系统）──
 _JIAK_DIR = Path.home() / ".hermes" / "jiak"
-if str(_JIAK_DIR) not in sys.path:
-    sys.path.insert(0, str(_JIAK_DIR))
+# 确保 ~/.hermes/jiak 在sys.path最前（T-ISA-7修复：其他测试可能把
+# ~/.hermes/jiak/scripts 插入sys.path，导致 jiak_api 内部
+# "from recall_append import ..." 拿到scripts旧版，import失败。
+# 只把根目录插最前，不删除scripts——Python按序查找会优先命中根目录新版，
+# 而其他测试仍可自行使用scripts路径）
+if str(_JIAK_DIR) in sys.path:
+    sys.path.remove(str(_JIAK_DIR))
+sys.path.insert(0, str(_JIAK_DIR))
+
+# sys.modules缓存驱逐（T-ISA-7根因修复）：全量测试中某测试可能先加载
+# scripts旧版recall_append到sys.modules，jiak_api的"from recall_append
+# import validate_and_append"会命中缓存旧版（无此函数）→ ImportError。
+# 检测并驱逐旧版，强制jiak_api重新解析到根目录新版。
+if "recall_append" in sys.modules:
+    _ra = sys.modules["recall_append"]
+    _ra_file = str(getattr(_ra, "__file__", ""))
+    if _ra_file.startswith(str(_JIAK_DIR / "scripts")) or not hasattr(_ra, "validate_and_append"):
+        del sys.modules["recall_append"]
 
 try:
     import jiak_api
@@ -43,7 +59,24 @@ EVICT_THRESHOLD = 0.3
 
 
 def _available() -> bool:
-    """jiak_api是否可用。不可用时所有操作返回错误（不静默）。"""
+    """jiak_api是否可用。不可用时所有操作返回错误（不静默）。
+
+    T-ISA-7根因修复：每次调用前检测sys.modules中的recall_append缓存——
+    若被其他模块先加载为scripts旧版（无validate_and_append），驱逐并重试。
+    这覆盖'污染发生在jiak_lifecycle首次import之后'的时序。
+    """
+    global jiak_api, _IMPORT_ERROR
+    if "recall_append" in sys.modules:
+        _ra = sys.modules["recall_append"]
+        _ra_file = str(getattr(_ra, "__file__", ""))
+        if _ra_file.startswith(str(_JIAK_DIR / "scripts")) or not hasattr(_ra, "validate_and_append"):
+            del sys.modules["recall_append"]
+    if jiak_api is None:
+        try:
+            import jiak_api
+            _IMPORT_ERROR = ""
+        except ImportError as e:
+            _IMPORT_ERROR = str(e)
     return jiak_api is not None
 
 

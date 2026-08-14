@@ -345,6 +345,61 @@ class MemoryBus:
 
     # ── 写入路径 ──
 
+    # ── Update操作（T-ISA-7 Phase2: 记忆可以被修正）──
+
+    def update(
+        self,
+        record_id: str,
+        field: str,
+        new_value,
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        """更新记忆记录（Update操作，从0到1）。
+
+        按record_id前缀路由：
+          - jiak:<card_id>:<opinion_id> → jiak_lifecycle.revise（版本化+immutable保护+历史存档）
+          - capsule:<session>:<hash>   → 暂不支持（胶囊为沉积岩，字段级更新需重写文件）
+          - causal:<hash>              → 暂不支持（待接入CausalMemory.update_importance）
+          - unified:<key>              → 暂不支持（UnifiedMemory仅有delete）
+
+        返回:
+            {"ok": True, ...} 成功
+            {"ok": False, "error": ...} 失败/不支持
+        """
+        if not record_id:
+            return {"ok": False, "error": "record_id不能为空"}
+
+        # jiak → revise（P0：完整Update能力）
+        if record_id.startswith("jiak:"):
+            parts = record_id.split(":")
+            if len(parts) < 2:
+                return {"ok": False, "error": f"jiak record_id格式错误: {record_id}"}
+            card_id = parts[1]
+            try:
+                from .jiak_lifecycle import revise as jl_revise
+                result = jl_revise(
+                    card_id=card_id,
+                    field=field,
+                    new_value=new_value,
+                    reason=reason or f"MemoryBus.update({record_id})",
+                )
+                if result.get("ok"):
+                    result["record_id"] = record_id
+                    return result
+                return result
+            except ImportError as e:
+                return {"ok": False, "error": f"jiak_lifecycle不可用: {e}"}
+            except Exception as e:
+                return {"ok": False, "error": f"jiak revise失败: {e}"}
+
+        # 其他provider：明确不支持（Phase 2路线）
+        provider = record_id.split(":", 1)[0]
+        return {
+            "ok": False,
+            "error": f"{provider} Update暂不支持（T-ISA-7 Phase 2路线）",
+            "supported": ["jiak"],
+        }
+
     def record_causal(
         self,
         action: str,
