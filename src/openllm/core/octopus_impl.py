@@ -151,16 +151,8 @@ class _LeftBrain:
     def think(self, ctx: Context, prediction: Optional[Prediction] = None,
               risk: Optional[RiskAssessment] = None) -> Proposal:
         """基于上下文提出方案"""
-        prompt = f"""你是openLLM的左脑。基于以下上下文，生成一个行动提案。
-上下文：{ctx.user_message}
-你的任务：
-1. 分析用户意图
-2. 提出具体的行动方案
-3. 评估方案的置信度（0-1）
-4. 列出支持方案的证据
-请用JSON格式输出：
-{{"content": "行动方案描述", "confidence": 0.7, "evidence": ["证据1", "证据2"], "tool_calls": []}}
-"""
+        prompt = f"""基于以下用户消息，给出你的回答。直接回答，不要JSON格式。
+用户：{ctx.user_message}"""
         resp = self.provider.chat([{"role": "user", "content": prompt}])
         # 解析LLM返回的JSON
         try:
@@ -211,16 +203,14 @@ class _RightBrain:
 {{"verdict": "approve|reject|revise", "concerns": ["关心点1"], "suggestions": ["建议1"]}}
 """
         resp = self.provider.chat([{"role": "user", "content": prompt}])
-        try:
-            data = json.loads(resp) if resp.startswith("{") else {"verdict": "approve"}
-        except:
-            data = {"verdict": "approve"}
-        
+        # 简单判断：包含reject/否/不行→reject，否则approve
+        resp_lower = resp.lower() if resp else ""
+        verdict = "reject" if any(w in resp_lower for w in ["reject", "否", "不行", "风险", "不合理"]) else "approve"
         return Critique(
-            content=resp[:100],
-            verdict=data.get("verdict", "approve"),
-            concerns=data.get("concerns", []),
-            suggestions=data.get("suggestions", []),
+            content=resp[:200] if resp else "",
+            verdict=verdict,
+            concerns=[],
+            suggestions=[],
         )
 
 

@@ -844,3 +844,83 @@ class HeuristicsConsumer:
                 semantic = str(trigger)
             lines.append(f"  - {semantic}")
         return "\n".join(lines)
+
+
+# ── G7 Trace Spec 治理（ETAS风格）──────────────────────────────
+
+class TraceSpecGovernance:
+    """
+    ETAS风格的trace spec治理——编译时策略约束 + 运行时monitor检查。
+    
+    灵感来源：ETAS (arXiv 2607.17780) 的 TraceSpecAlgebra。
+    核心机制：
+      1. 注册trace spec（allow/deny/temporal约束）
+      2. 编译为monitor
+      3. 每次tool执行时，通过monitor检查action trace
+      4. 不通过→拒绝commit
+    
+    对齐IOS：这是IOS治理引擎的G7组件。
+    """
+    
+    def __init__(self):
+        self._specs: dict[str, 'TraceSpec'] = {}  # name → spec
+        self._monitors: dict[str, 'TraceMonitor'] = {}  # name → compiled monitor
+        self._active_trace = None  # ActionTraceStore
+        self._active_spec: Optional[str] = None  # 当前激活的spec名
+    
+    def register_spec(self, spec) -> None:
+        """注册一个trace spec并编译为monitor。"""
+        from .trace_spec import TraceSpec, TraceMonitor
+        self._specs[spec.name] = spec
+        self._monitors[spec.name] = spec.compile()
+    
+    def set_trace(self, trace_store) -> None:
+        """设置当前action trace store。"""
+        self._active_trace = trace_store
+    
+    def activate(self, spec_name: str) -> bool:
+        """激活一个spec作为当前策略。"""
+        if spec_name not in self._specs:
+            return False
+        self._active_spec = spec_name
+        return True
+    
+    def check_action(self, action_name: str, phase: str = "commit") -> tuple[bool, Optional[str]]:
+        """
+        检查一个action是否通过当前激活的monitor。
+        
+        对齐ETAS: δ_Π(q_τ, event) → (passed, denial_reason)
+        实现：先暂存事件到trace，检查完整trace前缀，再移除。
+        """
+        if not self._active_spec or not self._active_trace:
+            return True, None  # 无策略=放行
+        
+        monitor = self._monitors.get(self._active_spec)
+        if not monitor:
+            return True, None
+        
+        from .action_trace import EventPhase, make_trace_event
+        
+        # 创建事件并暂存到trace（检查后移除）
+        event = make_trace_event(
+            EventPhase(phase) if phase in ("request", "commit") else EventPhase.COMMIT,
+            action_name,
+        )
+        self._active_trace.append(event)
+        
+        # 检查刚追加的commit事件
+        passed, reason = monitor.check_event(event, self._active_trace)
+        
+        # 移除暂存的事件（trace是append-only的，但我们用于预检查）
+        if self._active_trace._events and self._active_trace._events[-1] is event:
+            self._active_trace._events.pop()
+        
+        return passed, reason
+    
+    def get_summary(self) -> dict:
+        """获取治理状态摘要。"""
+        return {
+            "registered_specs": list(self._specs.keys()),
+            "active_spec": self._active_spec,
+            "trace_events": self._active_trace.size if self._active_trace else 0,
+        }

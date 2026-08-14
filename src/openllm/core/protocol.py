@@ -42,6 +42,9 @@ class HeartbeatContext:
     # ── 执行层输出 ──
     result: Optional[ActionResult] = None              # ISN: 执行结果
     output: str = ""                                   # IKO: 最终输出
+    
+    # ── 研究层输出 ──
+    research: Optional[dict] = None                    # 研究循环: 假说/实验/结论状态
     metrics: Optional[TickMetrics] = None              # IKO: 可观测数据
     
     # ── 元数据 ──

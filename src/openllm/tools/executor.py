@@ -239,8 +239,283 @@ def create_default_tools() -> ToolRegistry:
     registry.register("python_exec", tool_python_exec, "执行Python代码")
     
     # 章鱼记忆系统
-    from .octopus import tool_octopus_search, tool_octopus_self_model
-    registry.register("octopus_search", tool_octopus_search, "搜索章鱼记忆（RECALL+jiak cards）")
+    from .octopus import (
+        tool_octopus_search, tool_octopus_self_model,
+        tool_octopus_search_stats, tool_octopus_route, tool_octopus_health,
+    )
+    registry.register("octopus_search", tool_octopus_search, "搜索章鱼记忆+外部搜索（v4黑匣子记录）")
     registry.register("octopus_self_model", tool_octopus_self_model, "查看章鱼自省状态")
-    
+    registry.register("octopus_search_stats", tool_octopus_search_stats, "搜索黑匣子统计——后端成功率/延迟分布")
+    registry.register("octopus_route", tool_octopus_route, "根据查询推荐最优搜索后端（MAB策略）")
+    registry.register("octopus_health", tool_octopus_health, "章鱼搜索系统健康检查")
+
+    # ── curl-impersonate（浏览器TLS指纹模拟）──────────────────────
+    def tool_curl_impersonate(action: str = "health", **kwargs) -> str:
+        """浏览器TLS指纹模拟——绕过反爬检测。模拟Chrome/Firefox/Safari的TLS握手。"""
+        import json as _json
+        import sys as _sys
+        _sys.path.insert(0, "/home/zcs/.hermes/hermes-agent")
+        try:
+            from tools.curl_impersonate_tool import fetch as _fetch, batch as _batch, list_targets as _list
+        except ImportError as e:
+            return _json.dumps({"error": f"curl_impersonate模块未安装: {e}"})
+
+        if action == "fetch":
+            url = kwargs.get("url", "")
+            if not url:
+                return _json.dumps({"error": "url参数不能为空"})
+            target = kwargs.get("target", "chrome116")
+            timeout = int(kwargs.get("timeout", 15))
+            result = _fetch(url, target=target, timeout=timeout)
+            # 不返回content字段（太大），只返回元数据
+            result.pop("content", None)
+            return _json.dumps(result, ensure_ascii=False)
+        elif action == "batch":
+            urls_str = kwargs.get("urls", "")
+            if not urls_str:
+                return _json.dumps({"error": "urls参数不能为空"})
+            result = _batch(urls_str.split(","), target=kwargs.get("target", "chrome116"))
+            for r in result["results"]:
+                r.pop("content", None)
+            return _json.dumps(result, ensure_ascii=False)
+        elif action == "list_targets":
+            return _json.dumps(_list(), ensure_ascii=False)
+        elif action == "health":
+            import json as _json2
+            from tools.curl_impersonate_tool import health as _health
+            return _json2.dumps(_health())
+        return _json.dumps({"error": f"Unknown action: {action}"})
+
+    registry.register("curl_impersonate", tool_curl_impersonate,
+        "浏览器TLS指纹模拟——绕过反爬检测(Chrome/Firefox/Safari)",
+        schema={"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["fetch","batch","list_targets","health"]},
+            "url": {"type": "string"}, "urls": {"type": "string"},
+            "target": {"type": "string"}, "timeout": {"type": "integer"},
+        }, "required": ["action"]})
+
+    # ── tool_failure_log（失败驱动工具发现）──────────────────────────
+    def tool_failure_log(action: str = "health", **kwargs) -> str:
+        """工具失败日志——记录失败→统计频率→提取需求信号。只有失败的才是真需求。"""
+        import json as _json
+        import sys as _sys
+        _sys.path.insert(0, "/home/zcs/.hermes/hermes-agent")
+        try:
+            from tools.tool_failure_log import log as _log, stats as _stats, signals as _signals, health as _health
+        except ImportError as e:
+            return _json.dumps({"error": f"tool_failure_log模块未安装: {e}"})
+
+        if action == "log":
+            tool_name = kwargs.get("tool_name", "")
+            if not tool_name:
+                return _json.dumps({"error": "tool_name不能为空"})
+            result = _log(tool_name, kwargs.get("failure_type", "L1_hard"),
+                          kwargs.get("error_msg", ""), kwargs.get("context", ""))
+            return _json.dumps(result, ensure_ascii=False)
+        elif action == "stats":
+            return _json.dumps(_stats(int(kwargs.get("days", 7))), ensure_ascii=False)
+        elif action == "signals":
+            return _json.dumps(_signals(), ensure_ascii=False)
+        elif action == "health":
+            return _json.dumps(_health(), ensure_ascii=False)
+        return _json.dumps({"error": f"Unknown action: {action}"})
+
+    registry.register("tool_failure_log", tool_failure_log,
+        "工具失败日志——记录失败→统计→需求信号(失败驱动锻造)",
+        schema={"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["log","stats","signals","health"]},
+            "tool_name": {"type": "string"},
+            "failure_type": {"type": "string"},
+            "error_msg": {"type": "string"},
+            "context": {"type": "string"},
+        }, "required": ["action"]})
+
+    # ── daily_health_check（每日健康报告）──────────────────────────
+    def tool_daily_health_check(action: str = "health", **kwargs) -> str:
+        """搜索后端每日健康报告——检查所有后端状态。"""
+        import json as _json
+        import sys as _sys
+        _sys.path.insert(0, "/home/zcs/.hermes/hermes-agent")
+        try:
+            from tools.daily_health_check import run_check as _run, get_report as _report, get_history as _history
+        except ImportError as e:
+            return _json.dumps({"error": f"daily_health_check模块未安装: {e}"})
+
+        if action == "run":
+            return _json.dumps(_run(), ensure_ascii=False)
+        elif action == "report":
+            return _json.dumps(_report(), ensure_ascii=False)
+        elif action == "history":
+            return _json.dumps(_history(), ensure_ascii=False)
+        return _json.dumps({"status": "ok"})
+
+    registry.register("daily_health_check", tool_daily_health_check,
+        "搜索后端每日健康报告——检查bing/cnscrape/ddgs/arxiv等状态")
+
+    # ── tool_hunter（失败驱动工具猎手）──────────────────────────────
+    def tool_tool_hunter(action: str = "health", **kwargs) -> str:
+        """失败驱动工具猎手——从失败信号自动搜GitHub找替代品。"""
+        import json as _json
+        import sys as _sys
+        _sys.path.insert(0, "/home/zcs/.hermes/hermes-agent")
+        try:
+            from tools.tool_hunter import hunt as _hunt, search as _search
+        except ImportError as e:
+            return _json.dumps({"error": f"tool_hunter模块未安装: {e}"})
+
+        if action == "hunt":
+            return _json.dumps(_hunt(), ensure_ascii=False)
+        elif action == "search":
+            tool_name = kwargs.get("tool_name", "")
+            if not tool_name:
+                return _json.dumps({"error": "tool_name不能为空"})
+            return _json.dumps(_search(tool_name), ensure_ascii=False)
+        return _json.dumps({"status": "ok"})
+
+    registry.register("tool_hunter", tool_tool_hunter,
+        "失败驱动工具猎手——从失败信号搜GitHub找替代品",
+        schema={"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["hunt","search","health"]},
+            "tool_name": {"type": "string"},
+        }, "required": ["action"]})
+
+    # ── auto_forge（工厂自动锻造）──────────────────────────────────
+    def tool_auto_forge(action: str = "health", **kwargs) -> str:
+        """工厂自动锻造——评估GitHub项目是否可锻造为Hermes工具。"""
+        import json as _json
+        import sys as _sys
+        _sys.path.insert(0, "/home/zcs/.hermes/hermes-agent")
+        try:
+            from tools.auto_forge import evaluate as _eval, forge as _forge
+        except ImportError as e:
+            return _json.dumps({"error": f"auto_forge模块未安装: {e}"})
+
+        if action == "evaluate":
+            url = kwargs.get("url", "")
+            if not url:
+                return _json.dumps({"error": "url不能为空"})
+            return _json.dumps(_eval(url), ensure_ascii=False)
+        elif action == "forge":
+            url = kwargs.get("url", "")
+            if not url:
+                return _json.dumps({"error": "url不能为空"})
+            return _json.dumps(_forge(url), ensure_ascii=False)
+        return _json.dumps({"status": "ok"})
+
+    registry.register("auto_forge", tool_auto_forge,
+        "工厂自动锻造——评估GitHub项目→生成Hermes工具框架",
+        schema={"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["evaluate","forge","health"]},
+            "url": {"type": "string"},
+        }, "required": ["action"]})
+
+    # ── Resilience（从Crawlee移植的韧性模块）─────────────────────
+    def tool_resilience(action: str = "health", **kwargs) -> str:
+        """韧性模块——错误分类+指数退避重试+URL去重。从Crawlee源码提取的轻量机制。"""
+        import json as _json
+        import sys as _sys
+        _sys.path.insert(0, "/home/zcs/.hermes/hermes-agent")
+        try:
+            from tools.resilience import (
+                classify_error, retry_with_backoff, normalize_url,
+                URLDeduplicator, ErrorType, parse_retry_after
+            )
+        except ImportError as e:
+            return _json.dumps({"error": f"resilience模块未安装: {e}"})
+
+        if action == "classify":
+            status = kwargs.get("status_code")
+            timeout = kwargs.get("timeout", False)
+            result = classify_error(
+                status_code=int(status) if status else None,
+                timeout=bool(timeout)
+            )
+            return _json.dumps({"error_type": result.value, "action": "classify"})
+        elif action == "dedup_check":
+            url = kwargs.get("url", "")
+            dedup = URLDeduplicator()
+            return _json.dumps({"url": url, "is_new": dedup.is_new(url)})
+        elif action == "dedup_mark":
+            url = kwargs.get("url", "")
+            dedup = URLDeduplicator()
+            dedup.mark_seen(url)
+            return _json.dumps({"url": url, "marked": True})
+        elif action == "normalize":
+            url = kwargs.get("url", "")
+            return _json.dumps({"original": url, "normalized": normalize_url(url)})
+        elif action == "health":
+            return _json.dumps({"status": "ok", "module": "resilience", "version": "1.0.0"})
+        return _json.dumps({"error": f"Unknown action: {action}"})
+
+    registry.register("resilience", tool_resilience,
+        "韧性模块——错误分类+指数退避+URL去重(从Crawlee移植)",
+        schema={"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["classify","dedup_check","dedup_mark","normalize","health"]},
+            "status_code": {"type": "integer"}, "timeout": {"type": "boolean"},
+            "url": {"type": "string"},
+        }, "required": ["action"]})
+
+    # ── Loop Detector（从browser-use移植的循环检测）────────────────
+    def tool_loop_detector(action: str = "health", **kwargs) -> str:
+        """循环检测器——防止Agent卡死无限重试。从browser-use源码移植。"""
+        import json as _json
+        import sys as _sys
+        _sys.path.insert(0, "/home/zcs/.hermes/hermes-agent")
+        try:
+            from tools.loop_detector import LoopDetector
+        except ImportError as e:
+            return _json.dumps({"error": f"loop_detector模块未安装: {e}"})
+
+        if action == "record":
+            action_type = kwargs.get("action_type", "unknown")
+            params = kwargs.get("params", {})
+            if isinstance(params, str):
+                params = {"raw": params}
+            d = LoopDetector(window_size=20, repeat_nudge_1=5)
+            d.record_action(action_type, params)
+            nudge = d.get_nudge()
+            return _json.dumps({"action": "record", "action_type": action_type,
+                                "nudge": nudge, "rep_count": d.max_repetition_count})
+        elif action == "health":
+            return _json.dumps({"status": "ok", "module": "loop_detector", "version": "1.0.0"})
+        return _json.dumps({"error": f"Unknown action: {action}"})
+
+    registry.register("loop_detector", tool_loop_detector,
+        "循环检测器——防止Agent卡死无限重试(从browser-use移植)",
+        schema={"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["record","check","stats","reset","health"]},
+            "action_type": {"type": "string"}, "params": {"type": "object"},
+        }, "required": ["action"]})
+
+    # ── Snapshot Enhancer（从browser-use移植的结构化元素索引）──────
+    def tool_snapshot_enhancer(action: str = "health", **kwargs) -> str:
+        """结构化元素索引——解析ariaSnapshot生成可交互元素列表+操作提示。"""
+        import json as _json
+        import sys as _sys
+        _sys.path.insert(0, "/home/zcs/.hermes/hermes-agent")
+        try:
+            from tools.snapshot_enhancer import enhance_snapshot, count_interactive, parse_snapshot_elements
+        except ImportError as e:
+            return _json.dumps({"error": f"snapshot_enhancer模块未安装: {e}"})
+
+        if action == "enhance":
+            snapshot = kwargs.get("snapshot", "")
+            if not snapshot:
+                return _json.dumps({"error": "snapshot参数不能为空"})
+            result = enhance_snapshot(snapshot)
+            return _json.dumps({"action": "enhance", "enhanced": result})
+        elif action == "count":
+            snapshot = kwargs.get("snapshot", "")
+            return _json.dumps({"action": "count", "interactive_count": count_interactive(snapshot)})
+        elif action == "health":
+            return _json.dumps({"status": "ok", "module": "snapshot_enhancer", "version": "1.0.0"})
+        return _json.dumps({"error": f"Unknown action: {action}"})
+
+    registry.register("snapshot_enhancer", tool_snapshot_enhancer,
+        "结构化元素索引——解析ariaSnapshot生成可交互元素列表+操作提示(从browser-use移植)",
+        schema={"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["enhance","count","parse","health"]},
+            "snapshot": {"type": "string"}, "line": {"type": "string"},
+        }, "required": ["action"]})
+
     return registry

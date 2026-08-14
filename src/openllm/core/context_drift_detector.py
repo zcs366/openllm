@@ -77,11 +77,17 @@ def _cosine_sim(vec_a: Counter, vec_b: Counter) -> float:
 
 
 def _structural_drift(len_a: int, len_b: int) -> float:
-    """结构漂移：长度比越偏离1.0，漂移越大。返回0-1。"""
+    """结构漂移：对数尺度长度比，减少长句偏差。返回0-1。"""
+    import math as _math
     if max(len_a, len_b) == 0:
         return 0.0
-    ratio = min(len_a, len_b) / max(len_a, len_b)
-    return 1.0 - ratio  # ratio=1→漂移0，ratio=0→漂移1
+    # 对数尺度：10字vs100字的漂移 < 10字vs1000字
+    log_a = _math.log1p(len_a)
+    log_b = _math.log1p(len_b)
+    if max(log_a, log_b) == 0:
+        return 0.0
+    ratio = min(log_a, log_b) / max(log_a, log_b)
+    return 1.0 - ratio
 
 
 class ContextDriftDetector:

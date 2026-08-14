@@ -51,10 +51,10 @@ class LLMProvider:
                 json={
                     "model": self.model,
                     "messages": messages,
-                    "max_tokens": 1024,
+                    "max_tokens": 8192,
                     "temperature": 0.7,
                 },
-                timeout=30,
+                timeout=120,
             )
             resp.raise_for_status()
             data = resp.json()
@@ -64,6 +64,12 @@ class LLMProvider:
                 "completion_tokens": usage.get("completion_tokens", 0),
                 "total_tokens": usage.get("total_tokens", 0),
             }
-            return data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]["message"]
+            content = choice.get("content", "")
+            # 推理模型: content可能为空(reasoning吃掉全部token)
+            # 仅在content确实为空时fallback到reasoning_content
+            if not content and choice.get("reasoning_content"):
+                content = choice["reasoning_content"]
+            return content
         except Exception as e:
             return f"[LLM错误] {e}"

@@ -13,6 +13,8 @@ from typing import Any, Callable, Optional
 import time
 
 from .router import RuleRouter, RoutingContext, PhaseAction, create_router
+from .router_logger import RouterLogger
+from .routing_degradation import DegradationTracker, safe_route
 
 
 class LoopPhase(Enum):
@@ -58,6 +60,10 @@ class AgentLoop:
     turn_count: int = 0
     # 路由器（默认启用）
     router: RuleRouter = field(default_factory=RuleRouter)
+    # 路由日志记录器
+    router_logger: RouterLogger = field(default_factory=RouterLogger)
+    # 降级追踪器
+    degradation_tracker: DegradationTracker = field(default_factory=DegradationTracker)
 
     # 外部注入的回调（由Memory/Identity/Security层提供）
     on_plan: Optional[Callable] = None
@@ -101,7 +107,9 @@ class AgentLoop:
             consecutive_identical=consecutive,
             last_tool_success=self._last_tool_success if hasattr(self, '_last_tool_success') else None,
         )
-        decisions = self.router.route(routing_ctx)
+        decisions, degraded, alert = safe_route(
+            self.router, routing_ctx, self.degradation_tracker
+        )
         self.router.record_intent(user_input)
 
         # ── 按路由决策执行各阶段 ──
@@ -133,7 +141,18 @@ class AgentLoop:
             "skipped": sum(1 for d in decisions if d.action == PhaseAction.SKIP),
             "degraded": sum(1 for d in decisions if d.action == PhaseAction.DEGRADED),
             "total": len(decisions),
+            "fallback_degraded": degraded,
+            "degradation_alert": alert,
         }
+        
+        # 路由可观测化：写入JSONL日志
+        self.router_logger.log_decision(
+            intent=user_input,
+            turn_count=self.turn_count,
+            decisions=decisions,
+            context_pct=context_pct,
+            stats=ctx.self_state["routing"],
+        )
 
         # 自检
         vitals = self.check_vitals()

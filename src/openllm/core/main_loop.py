@@ -5,7 +5,7 @@ openLLM Agent主循环 — 三体组装层
 感知层(ISA+章鱼I) → 决策层(IOS) → 执行层(ISN+IKO)
 心跳驱动三层轮流工作。
 """
-import json, os, sys, time, uuid
+import json, os, sys, time, uuid, io, contextlib
 from pathlib import Path
 
 # 数据模型
@@ -42,6 +42,15 @@ class Agent:
     """openLLM Agent — 独立运行的Agent框架"""
     
     def __init__(self, mode: str = "console"):
+        self.mode = mode
+        
+        # 静默模式：suppress所有print
+        if mode == "silent":
+            self._suppress = contextlib.redirect_stdout(io.StringIO())
+            self._suppress.__enter__()
+        else:
+            self._suppress = None
+        
         # 五体初始化
         self.isa = ISA(mode)
         self.octopus = 章鱼I()
@@ -59,7 +68,7 @@ class Agent:
         from .idle_wander import IdleWanderer
         self._wanderer = IdleWanderer(threshold=3)
 
-        self.session = create_session(max_context_tokens=100000)
+        self.session = create_session(max_context_tokens=self._load_max_context())
         
         # 状态
         self.running = False
@@ -71,8 +80,20 @@ class Agent:
         self._budget_manager = InferenceBudgetManager() if _HAS_BUDGET else None
         self._budget_checked_today = False
         
+        # ── IOS Layer 15 Token经济（接入v1·2026-07-30） ──
+        from .token_economy import TokenEconomy
+        self._token_economy = TokenEconomy()
+        
+        # ── IAX+IOS Layer 11 上下文漂移检测（接入v1·2026-07-30） ──
+        from .context_drift_detector import ContextDriftDetector
+        self._drift_detector = ContextDriftDetector()
+        
         # ── tool_validator 失败追踪 ──
         self._tool_failures: list[dict] = []
+
+        # ── 研究引擎（实验+论文+研究循环） ──
+        from ..tools.research_loop import ResearchLoop
+        self.research = ResearchLoop()
     
     def run(self):
         """主循环入口"""
@@ -96,9 +117,9 @@ class Agent:
                     print(f"  🔴 不可恢复错误: {e}")
                     break
         
-        self.iko.shutdown()
-        self.session.end()
-        print("\n═══ openLLM Agent 关闭 ═══")
+        self.shutdown()
+        if self.mode != "silent":
+            print("\n═══ openLLM Agent 关闭 ═══")
     
     def run_once(self, message: str) -> str:
         """
@@ -113,10 +134,60 @@ class Agent:
         try:
             msg = Message(text=message)
             self._execute_tick(msg)
-            return self._last_output
+            return self._clean_output(self._last_output)
         finally:
             self.isa.mode = saved_mode
     
+    def shutdown(self):
+        """关闭Agent，恢复stdout"""
+        if self._suppress:
+            self._suppress.__exit__(None, None, None)
+            self._suppress = None
+        self.iko.shutdown()
+        self.session.end()
+    
+
+    def _load_max_context(self) -> int:
+        """从config.json读取max_context_tokens。"""
+        import json
+        cfg_path = Path.home() / ".openllm" / "config.json"
+        if cfg_path.exists():
+            try:
+                cfg = json.loads(cfg_path.read_text())
+                return cfg.get("agent", {}).get("max_context_tokens", 100000)
+            except Exception:
+                pass
+        return 100000
+
+    def _clean_output(self, raw: str) -> str:
+        """从Agent raw output中提取干净回复。过滤内部系统噪声。"""
+        if not raw:
+            return ""
+        lines = raw.split("\n")
+        # 内部系统标记
+        noise = ["[L1]", "[L2]", "[L3]", "[L4]", "[L5]", "[isa_ice]", "摘要:",
+                 "🔴", "🗜️", "[jiak", "🔍", "□ ", "━━", "──", "│ ", "╔", "╚",
+                 "关键决策", "关键句", "最近洞察", "[章鱼", "[PLUR", "[openllm",
+                 "[jika", "[ambient", "---", "强制读取", "未读不可跳过", "语义场",
+                 "铁律", "[上下文压缩", "线索:", "来源:", "写入方式", "意识笔记",
+                 "写入", "同时追加", "第一人称", "不要总结", "🐙", "[文档]",
+                 "[isa_ice]", "[记忆]", "[openllm-", "[octopus-", "[jiak-",
+                 "token:", "[UNTRUSTED]", "搜索词", "搜索经验", "有新洞察"]
+        # 从末尾往前找最后一段"干净"文本
+        last_clean = len(lines) - 1
+        for i in range(len(lines) - 1, -1, -1):
+            s = lines[i].strip()
+            if not s:
+                continue
+            if any(n in s for n in noise):
+                break
+            last_clean = i
+        # 取last_clean到末尾
+        result = "\n".join(lines[last_clean:]).strip()
+        # 去掉空行
+        result = "\n".join(l for l in result.split("\n") if l.strip()).strip()
+        return result if result else raw.strip()
+
     def _tick(self):
         """一次心跳"""
         msg = self.isa.listen()
@@ -139,8 +210,8 @@ class Agent:
                 self.iko.trace("wander", "ok", detail=f"{d.domain}: {d.finding[:40]}")
     
     def _record_inference(self, phase: str):
-        """IAX: 从LLMProvider提取最近一次调用的token使用量，记录到预算管理器"""
-        if not self._budget_manager:
+        """IAX: 从LLMProvider提取最近一次调用的token使用量，记录到预算管理器+Token经济"""
+        if not self._budget_manager and not self._token_economy:
             return
         # 从左右脑provider取_last_usage（Phase 3用左脑，Phase 5用左脑+右脑）
         usage = getattr(self.octopus.left.provider, '_last_usage', {})
@@ -149,21 +220,31 @@ class Agent:
         if prompt_tokens == 0 and completion_tokens == 0:
             return  # 模拟模式或无数据，跳过
         try:
-            rec = self._budget_manager.record_inference(
-                model=self.octopus.left.provider.model,
-                tokens_in=prompt_tokens,
-                tokens_out=completion_tokens,
-                duration_ms=0,  # 精确计时在phase trace中已有
-            )
-            self.iko.trace("budget", "ok",
-                detail=f"{phase}: in={prompt_tokens} out={completion_tokens} cost=${rec.cost_usd:.4f}")
-            # 每天第一次调用时检查预算
-            if not self._budget_checked_today:
-                self._budget_checked_today = True
-                budget = self._budget_manager.check_budget()
-                if budget["over_budget"]:
-                    print(f"  ⚠️ IAX 推理预算超限: {budget['total_tokens']}/{budget['limit']} "
-                          f"({budget['usage_ratio']:.0%}) 今日成本=${budget['cost_usd']:.4f}")
+            # ── 原有：budget_manager记录 ──
+            if self._budget_manager:
+                rec = self._budget_manager.record_inference(
+                    model=self.octopus.left.provider.model,
+                    tokens_in=prompt_tokens,
+                    tokens_out=completion_tokens,
+                    duration_ms=0,  # 精确计时在phase trace中已有
+                )
+                self.iko.trace("budget", "ok",
+                    detail=f"{phase}: in={prompt_tokens} out={completion_tokens} cost=${rec.cost_usd:.4f}")
+                # 每天第一次调用时检查预算
+                if not self._budget_checked_today:
+                    self._budget_checked_today = True
+                    budget = self._budget_manager.check_budget()
+                    if budget["over_budget"]:
+                        print(f"  ⚠️ IAX 推理预算超限: {budget['total_tokens']}/{budget['limit']} "
+                              f"({budget['usage_ratio']:.0%}) 今日成本=${budget['cost_usd']:.4f}")
+            # ── 新增：token_economy记录 ──
+            if self._token_economy:
+                self._token_economy.record_usage(
+                    model=self.octopus.left.provider.model,
+                    tokens_in=prompt_tokens,
+                    tokens_out=completion_tokens,
+                    task=phase,
+                )
         except Exception:
             pass  # 预算追踪失败不阻塞主循环
 
@@ -180,6 +261,21 @@ class Agent:
 def main():
     """CLI入口"""
     args = sys.argv[1:]
+    
+    if "--agent-mode" in args:
+        # Agent模式：静默启动，支持结构化API
+        agent = Agent(mode="silent")
+        try:
+            if "--once" in args:
+                idx = args.index("--once")
+                message = args[idx + 1] if idx + 1 < len(args) else "你好"
+                result = agent.run_once(message)
+                print(result)
+            else:
+                agent.run()
+        finally:
+            agent.shutdown()
+        return
     
     if "--once" in args:
         # 单次模式

@@ -11,15 +11,21 @@ from .models import Context, Prediction, RiskAssessment
 
 
 def risk_check(ios, ctx: Context, prediction: Prediction) -> RiskAssessment:
-    """Phase 4: 风险评估 — 血管接线engine.py验证链 + 因果历史检索 + 治理规则"""
+    """Phase 4: 风险评估 — 白名单前置→engine验证→治理规则→因果历史"""
+    # ═══ 白名单前置检查（奥卡姆剃刀：能用白名单解决的，不用动态发现）═══
+    simple_risk = ios._simple_governance_check()
+    if simple_risk and simple_risk.is_blocked():
+        return simple_risk
+
     # 血管接线：engine.py的安全检查
     from .engine_bridge import check_action, check_tool_risk
     ok, reason = check_action("risk_check")
     if not ok:
         return RiskAssessment(level="high", blocked=True, reason=reason)
     
-    # 血管接线：engine.py的ISN风险检查（如有工具调用意图）
-    if prediction.risk_signals:
+    # 血管接线：engine.py的ISN风险检查（仅有工具调用意图时）
+    tool_calls = getattr(prediction, 'tool_calls', None) or []
+    if prediction.risk_signals and tool_calls:
         risk = check_tool_risk("unknown")
         if not risk["pass"]:
             return RiskAssessment(level="high", blocked=True, 

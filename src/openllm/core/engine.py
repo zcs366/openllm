@@ -99,6 +99,10 @@ class OpenLLMEngine:
         self.memory = MemoryOS(Path(config.capsule_dir))
         self.security = SecurityFoundation(Path(config.capsule_dir))
         self.tools = create_default_tools()
+        
+        # ISN Tool Registry Bridge（动态工具注册）
+        from ..isn.tool_registry_bridge import ToolRegistryBridge
+        self.tool_bridge = ToolRegistryBridge(self.tools)
 
         # 身份
         self.soul = Soul(name=config.name)
@@ -233,6 +237,15 @@ class OpenLLMEngine:
             p = self.config.provider
             if p == "ollama":
                 api_key = "ollama"
+            elif p == "mimo":
+                api_key = os.environ.get("MIMO_API_KEY", "")
+                if not api_key:
+                    # 从config.json读取
+                    import json
+                    cfg_path = Path.home() / ".openllm" / "config.json"
+                    if cfg_path.exists():
+                        cfg = json.loads(cfg_path.read_text())
+                        api_key = cfg.get("providers", {}).get("mimo", {}).get("api_key", "")
             elif p == "anthropic":
                 api_key = os.environ.get("ANTHROPIC_API_KEY", "")
             elif p == "gemini":
@@ -332,6 +345,47 @@ class OpenLLMEngine:
         from .tool_validator import verify_tool_params
         return verify_tool_params(tool_name, **self._TOOL_PARAM_SCHEMAS, **kwargs)
 
+    # ── 生成即验证：代码语法检查 ────────────────────
+
+    def _verify_code_syntax(self, code: str) -> tuple[bool, str]:
+        """验证Python代码语法。返回 (成功, 错误信息)。
+
+        使用 py_compile 在临时文件上编译，捕获语法错误。
+        不执行代码，只检查语法合法性。
+        """
+        import py_compile
+        import tempfile
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='w', suffix='.py', delete=False
+            ) as f:
+                f.write(code)
+                tmp_path = f.name
+            py_compile.compile(tmp_path, doraise=True)
+            return True, ""
+        except py_compile.PyCompileError as e:
+            return False, str(e)
+        except SyntaxError as e:
+            return False, f"SyntaxError: {e.msg} (line {e.lineno})"
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+    def _extract_python_blocks(self, text: str) -> list[str]:
+        """从模型输出中提取所有Python代码块内容。"""
+        if not text:
+            return []
+        blocks = re.findall(r'```(?:python)?\s*\n(.*?)```', text, re.DOTALL)
+        # 过滤掉纯空/纯注释块
+        return [b for b in blocks if b.strip() and not all(
+            line.strip().startswith('#') or not line.strip()
+            for line in b.splitlines()
+        )]
+
     def _verify_tool_result(self, tool_name: str, result: ToolResult) -> dict:
         from .tool_validator import verify_tool_result
         return verify_tool_result(tool_name, result)
@@ -420,16 +474,35 @@ class OpenLLMEngine:
         from .engine_utils import build_system_prompt
         return build_system_prompt(self.tools.list_tools(), identity, mem_ctx)
 
+    # ── P0: 工具执行循环 + 重复检测 ──
+    MAX_TOOL_ROUNDS = 5       # 单轮对话最多执行5次工具调用（可配置）
+    MAX_REPETITION = 3        # 连续重复自我纠正的阈值（可配置）
+    MIN_MSG_LEN = 20          # 短消息过滤阈值（<此长度跳过重复检测，避免工具结果注入误触发）
+    _REPETITION_PATTERNS = re.compile(
+        r'(让我重新算|不对|我再查|让我重新|重新计算|让我再想|重新思考|让我再算|'
+        r'let me recalculate|that\'?s? wrong|let me check again|let me rethink|let me redo)',
+        re.IGNORECASE
+    )
+    # 工具名→默认参数名映射（新增工具时在此添加）
+    _TOOL_ARG_MAP = {
+        "read_file": "path", "write_file": "path", "search_files": "path",
+        "search": "path", "shell": "command", "terminal": "command",
+        "python_exec": "command", "list_dir": "path",
+        "octopus_search": "query", "octopus_self_model": "query",
+        "ocr": "file_path",
+    }
+
     def chat(self, user_input: str, stream: bool = True) -> str:
         """
-        一轮完整对话。
+        一轮完整对话（P0升级：工具执行循环 + 重复检测）。
 
         1. 停机检查
         2. 安全检查
-        3. Agent Loop → plan
-        4. 判断是否需要工具调用
-        5. 调用模型（流式）
-        6. 返回响应
+        3. 记忆注入
+        4. 调用模型
+        5. 检测工具调用 → 执行 → 反馈 → 循环
+        6. 重复检测 → 截断
+        7. 返回响应
         """
         if not user_input.strip():
             return ""
@@ -460,7 +533,8 @@ class OpenLLMEngine:
                     mem_parts.append("过去洞察: " + "; ".join(insights[:2]))
                 if mem_parts:
                     memory_injection = "[记忆上下文] " + " | ".join(mem_parts)
-                    self._history.append(Message(role="system", content=memory_injection))
+                    # 用user角色注入记忆，避免多system消息导致Ollama混淆
+                    self._history.append(Message(role="user", content=memory_injection))
         except Exception as e:
             logger.debug(f"记忆注入跳过: {e}")
 
@@ -475,10 +549,267 @@ class OpenLLMEngine:
         # 调用模型
         if not self.connected:
             response = f"[未连接API] 收到。(turn #{self.loop.turn_count})"
-        else:
-            response = self._call_model(stream=stream)
+            self._history.append(Message(role="assistant", content=response))
+            return response
+
+        response = self._call_model(stream=stream)
+
+        # ── P0: 工具执行循环 ──
+        tool_rounds = 0
+        accumulated_text = []  # 累积工具循环中的文本输出
+
+        while tool_rounds < self.MAX_TOOL_ROUNDS:
+            tool_call = self._detect_tool_call(response)
+            if not tool_call:
+                break
+
+            # 保留模型输出中的文本部分（工具调用之前的文字）
+            # 从response中移除工具调用代码块，保留其余文本
+            text_before_tool = re.sub(r'```(?:python)?\s*\n.*?```', '', response, flags=re.DOTALL).strip()
+            if text_before_tool and len(text_before_tool) > 10:
+                accumulated_text.append(text_before_tool)
+
+            tool_name, tool_args = tool_call
+            logger.info(f"工具调用检测: {tool_name}({tool_args})")
+
+            # 执行工具
+            try:
+                result = self.execute_tool(tool_name, **tool_args)
+                tool_output = result.output if result.success else f"错误: {result.error}"
+            except Exception as e:
+                tool_output = f"工具执行异常: {e}"
+
+            # 空结果保护：工具返回空时注入有意义的反馈
+            if not tool_output or not tool_output.strip():
+                tool_output = f"[工具 {tool_name} 执行完成，但返回了空结果。参数: {tool_args}]"
+
+            # 将工具结果注入历史（只注入工具结果，不注入中间状态的assistant消息）
+            truncated = tool_output[:1500] + '...[truncated]...' + tool_output[-500:] if len(tool_output) > 2000 else tool_output
+            self._history.append(Message(
+                role="user",
+                content=f"[工具结果: {tool_name}] {truncated}"
+            ))
+
+            # 重新调用模型，让它基于工具结果继续（P1: 改为流式降低感知延迟）
+            response = self._call_model(stream=True)
+            tool_rounds += 1
+
+        # ── 验证管线：代码验证→声明验证→重复检测→checkpoint ──
+        from .verification_pipeline import VerificationPipeline
+        pipeline = VerificationPipeline(self)
+        report = pipeline.run(response)
+        response = report.final_response
+
+        if report.failed_steps > 0:
+            logger.warning(f"验证管线: {report.passed_steps}/{report.total_steps}通过, {report.failed_steps}失败")
+
+        # 如果最终response为空但有累积文本，使用累积文本
+        if (not response or not response.strip()) and accumulated_text:
+            response = "\n\n".join(accumulated_text)
 
         self._history.append(Message(role="assistant", content=response))
+        return response
+
+    def _detect_tool_call(self, text: str) -> Optional[tuple]:
+        """从模型输出中检测工具调用意图。返回 (tool_name, args) 或 None。
+        
+        注意：模型输出可能同时包含文本和工具调用。
+        此方法只检测是否存在工具调用，不修改原始text。
+        """
+        if not text:
+            return None
+
+        # 模式1: ```python ... ``` 代码块中包含工具调用
+        code_blocks = re.findall(r'```(?:python)?\s*\n(.*?)```', text, re.DOTALL)
+        for block in code_blocks:
+            for tool_name in self.tools._tools:
+                # 用词边界匹配，避免匹配"result"等变量名
+                if re.search(rf'\b{re.escape(tool_name)}\s*\(', block):
+                    args = self._extract_args_from_code(block, tool_name)
+                    return (tool_name, args)
+
+        # 模式2: 自然语言中的工具请求
+        # "使用read_file读取..." / "执行terminal命令..." / "调用search_files..."
+        tool_patterns = [
+            (r'(?:使用|调用|执行|run|use|call)\s*(\w+)\s*(?:读取|查看|搜索|执行|写入|打开|查找)',
+             lambda m: self._extract_natural_args(text, m.group(1))),
+            (r'(\w+)\s*\(\s*["\']([^"\']+)["\']',  # read_file("path") 格式
+             lambda m: (m.group(1), {"path": m.group(2)}) if m.group(1) in self.tools._tools else None),
+        ]
+
+        for pattern, extractor in tool_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                result = extractor(match)
+                if result:
+                    return result
+
+        return None
+
+    def _extract_args_from_code(self, code: str, tool_name: str) -> dict:
+        """从Python代码块中提取工具参数。"""
+        args = {}
+        # 简单提取: tool_name("arg") 或 tool_name(key="value")
+        patterns = [
+            rf'{tool_name}\s*\(\s*["\']([^"\']+)["\']',  # 位置参数
+            rf'{tool_name}\s*\(\s*(\w+)\s*=\s*["\']([^"\']+)["\']',  # 关键字参数
+        ]
+        for p in patterns:
+            m = re.search(p, code)
+            if m:
+                if len(m.groups()) == 1:
+                    # 位置参数：从映射表读取参数名，未知工具默认query
+                    param_name = self._TOOL_ARG_MAP.get(tool_name, "query")
+                    args[param_name] = m.group(1)
+                elif len(m.groups()) == 2:
+                    args[m.group(1)] = m.group(2)
+                break
+        return args
+
+    def _extract_natural_args(self, text: str, tool_name: str) -> Optional[tuple]:
+        """从自然语言中提取工具参数。"""
+        # 提取引号内容或路径
+        quoted = re.findall(r'["\']([^"\']+)["\']', text)
+        if quoted:
+            param_name = self._TOOL_ARG_MAP.get(tool_name, "query")
+            return (tool_name, {param_name: quoted[0]})
+
+        # 提取路径模式
+        path_match = re.search(r'[/\\][\w./\\-]+\.\w+', text)
+        if path_match and self._TOOL_ARG_MAP.get(tool_name) == "path":
+            return (tool_name, {"path": path_match.group()})
+
+        return None
+
+    def _check_repetition(self, response: str) -> str:
+        """检测输出中的重复自我纠正模式，必要时截断。"""
+        if not response:
+            return response
+
+        # 只统计最近3条assistant消息中的自我纠正
+        recent_assistant = [
+            m.content for m in self._history[-10:]
+            if m.role == "assistant"
+        ][-self.MAX_REPETITION:]
+
+        repetition_count = 0
+        for prev in recent_assistant:
+            # 跳过太短的消息（<MIN_MSG_LEN，可能是工具结果注入）
+            if len(prev) < self.MIN_MSG_LEN:
+                continue
+            if self._REPETITION_PATTERNS.search(prev):
+                repetition_count += 1
+
+        # 当前输出也有自我纠正模式（且足够长）
+        if len(response) > self.MIN_MSG_LEN and self._REPETITION_PATTERNS.search(response):
+            repetition_count += 1
+
+        if repetition_count >= self.MAX_REPETITION:
+            logger.warning(f"重复检测触发: {repetition_count}次自我纠正")
+            return (
+                "⚠️ 我发现自己在这个问题上反复纠缠，无法给出清晰答案。\n"
+                "建议：换个角度提问，或者这个问题可能超出了我当前的能力范围。"
+            )
+
+        return response
+
+    # ── 事实声明验证：用工具回查模型输出中的事实性声明 ──
+    _CLAIM_FILE_PATTERN = re.compile(
+        r'(?:/[\w.][\w./\-]*|~/[\w./\-]+)\.\w{1,10}(?![\w/])'
+    )
+    _CLAIM_URL_PATTERN = re.compile(
+        r'https?://[^\s\)\]\>\"\']+'
+    )
+    _CLAIM_LINECOUNT_PATTERN = re.compile(
+        r'(?:共|包含|总计|大约?|约|~)\s*(\d{1,6})\s*(?:行|lines?|条|个)',
+        re.IGNORECASE
+    )
+    MAX_CLAIM_VERIFY = 5  # 最多验证5个声明，避免过慢
+
+    def _extract_file_paths_safe(self, response: str) -> list[str]:
+        """提取文件路径，排除URL中的路径片段。
+
+        先定位所有URL的[start, end)范围，再从文件路径匹配中
+        剔除落入URL范围内的候选。
+        """
+        # 收集所有URL的字符范围
+        url_ranges = [
+            (m.start(), m.end()) for m in self._CLAIM_URL_PATTERN.finditer(response)
+        ]
+
+        def in_url_range(start: int) -> bool:
+            for s, e in url_ranges:
+                if s <= start < e:
+                    return True
+            return False
+
+        # 提取文件路径，排除URL内的
+        paths = []
+        for m in self._CLAIM_FILE_PATTERN.finditer(response):
+            if not in_url_range(m.start()):
+                paths.append(m.group())
+        return paths
+
+    def _verify_claims(self, response: str) -> str:
+        """验证response中的事实性声明，用已注册工具回查。
+
+        提取的声明类型：
+          1. 文件路径 → read_file验证文件存在
+          2. URL → 基本格式校验（不做网络请求，太重）
+          3. 数字/行数声明 → 标记为已提取（无法自动验证）
+
+        如果任何可验证的声明失败，在response末尾追加警告。
+        """
+        if not response or len(response) < 10:
+            return response
+
+        failed: list[str] = []
+        verified = 0
+
+        # 1. 文件路径验证（排除URL中的路径）
+        file_paths = self._extract_file_paths_safe(response)
+        for fp in file_paths[:self.MAX_CLAIM_VERIFY]:
+            expanded = os.path.expanduser(fp)
+            try:
+                from .tool_executor import execute_tool as _exec
+                result = _exec(self, "read_file", path=expanded)
+                if not result.success:
+                    # 也尝试原始路径
+                    rel_result = _exec(self, "read_file", path=fp)
+                    if not rel_result.success:
+                        failed.append(f"文件 {fp} 不可读")
+                    else:
+                        verified += 1
+                else:
+                    verified += 1
+            except Exception:
+                failed.append(f"文件 {fp} 验证异常")
+
+        # 2. URL格式验证（轻量级，不做网络请求）
+        urls = self._CLAIM_URL_PATTERN.findall(response)
+        for url in urls[:self.MAX_CLAIM_VERIFY - verified]:
+            if not re.match(r'https?://[\w\-\.]+\.[\w]{2,}', url):
+                failed.append(f"URL格式异常: {url[:80]}")
+            else:
+                verified += 1
+
+        # 3. 数字声明提取——记录为"已识别但无法自动验证"
+        linecount_matches = self._CLAIM_LINECOUNT_PATTERN.findall(response)
+        unverifiable = len(linecount_matches)
+        if unverifiable > 0:
+            logger.debug(f"事实声明验证: 识别到{unverifiable}条数字声明（无法自动验证）")
+
+        if failed:
+            warning = (
+                "\n\n⚠️ 以上声明未经验证: "
+                + "; ".join(failed)
+            )
+            logger.info(f"事实声明验证: {len(failed)}项失败, {verified}项通过")
+            return response + warning
+
+        if verified > 0:
+            logger.debug(f"事实声明验证: {verified}项通过, 0项失败")
+
         return response
 
     def _call_model(self, stream: bool = True) -> str:

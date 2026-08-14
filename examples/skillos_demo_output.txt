@@ -1,0 +1,304 @@
+
+========================================================================
+  SkillOS RL Curation — Proof of Concept
+========================================================================
+
+This demo shows how the SkillOSAdapter learns curation policies from
+synthetic skill usage history. We simulate 3 iterations of RL-style
+curation, where each round adjusts the policy based on feedback.
+
+Key signals used:
+  • success_signal   — How often the skill succeeds
+  • efficiency_signal — Quality per token consumed
+  • recency_signal   — How recently the skill was used (exponential decay)
+  • uniqueness_signal — How unique this skill is in its task group
+  • compression_signal — Rewards smaller, more efficient skills
+  • curator_signal   — External curator quality assessment
+
+
+========================================================================
+  Iteration 0: Initial Skill Pool (15 skills)
+========================================================================
+
+  Pool size: 15 skills
+  Task groups: 3
+
+  Expected quality tiers:
+    Tier 1 (Keep):     search-engine, code-review, summarizer
+    Tier 2 (Keep):     translator-en-zh, debug-helper, web-scraper
+    Tier 3 (Merge):    old-summarizer, basic-search, text-formatter
+    Tier 4 (Retire):   broken-regex, deprecated-api-v1, spam-generator
+    Tier 5 (Retire):   zombie-tool, ghost-skill, dead-weight
+
+  Skill                   Success   Effici   Recenc    Uniqu    Compr   Curatr    TOTAL
+  ---------------------- -------- -------- -------- -------- -------- -------- --------
+  search-engine             0.960    0.432    1.000    0.000    0.850    0.920    0.700
+  code-review               0.900    0.377    1.000    0.000    0.800    0.880    0.662
+  summarizer                0.886    0.358    1.000    0.000    0.750    0.850    0.646
+  translator-en-zh          0.840    0.307    1.000    0.000    0.650    0.700    0.591
+  web-scraper               0.800    0.278    1.000    0.000    0.550    0.650    0.558
+  debug-helper              0.750    0.259    1.000    0.000    0.600    0.680    0.551
+  old-summarizer            0.600    0.162    0.871    0.000    0.350    0.400    0.408
+  text-formatter            0.600    0.182    0.616    0.000    0.280    0.350    0.359
+  basic-search              0.500    0.145    0.724    0.000    0.300    0.380    0.349
+  spam-generator            0.333    0.050    0.370    0.000    0.030    0.050    0.159
+  broken-regex              0.250    0.068    0.294    0.000    0.080    0.120    0.146
+  deprecated-api-v1         0.200    0.059    0.137    0.000    0.050    0.080    0.099
+  zombie-tool               0.000    0.034    0.064    0.000    0.010    0.010    0.019
+  ghost-skill               0.000    0.034    0.016    0.000    0.010    0.010    0.012
+  dead-weight               0.000    0.000    0.000    0.000    0.000    0.000    0.000
+
+========================================================================
+  Iteration 1: First Curation Pass
+========================================================================
+
+  Policy: keep≥0.60 | merge=[0.10, 0.60) | retire<0.10
+  Max skills per group: 10
+
+  Decisions made: 15
+  ✅ KEEP:  6
+  🔄 MERGE: 9
+  ❌ RETIRE: 0
+
+  Decisions:
+  ✅ KEEP   search-engine           score=0.8495  conf=1.000
+         Score 0.850 >= keep_threshold 0.60. Signals: success=0.96, efficiency=0.43, recency=1.00
+  ✅ KEEP   code-review             score=0.8125  conf=1.000
+         Score 0.812 >= keep_threshold 0.60. Signals: success=0.90, efficiency=0.38, recency=1.00
+  ✅ KEEP   summarizer              score=0.7955  conf=1.000
+         Score 0.796 >= keep_threshold 0.60. Signals: success=0.89, efficiency=0.36, recency=1.00
+  ✅ KEEP   translator-en-zh        score=0.7414  conf=0.999
+         Score 0.741 >= keep_threshold 0.60. Signals: success=0.84, efficiency=0.31, recency=1.00
+  ✅ KEEP   web-scraper             score=0.7082  conf=1.000
+         Score 0.708 >= keep_threshold 0.60. Signals: success=0.80, efficiency=0.28, recency=1.00
+  ✅ KEEP   debug-helper            score=0.7013  conf=0.997
+         Score 0.701 >= keep_threshold 0.60. Signals: success=0.75, efficiency=0.26, recency=1.00
+  🔄 MERGE  old-summarizer          score=0.5581  conf=0.982
+         Score 0.558 in [retire, keep) range [0.10, 0.60). Candidate for merge or optimization
+  🔄 MERGE  text-formatter          score=0.5093  conf=0.912
+         → merge target: old-summarizer
+         Score 0.509 in [retire, keep) range [0.10, 0.60). Candidate for merge or optimization →...
+  🔄 MERGE  basic-search            score=0.4995  conf=0.953
+         Score 0.499 in [retire, keep) range [0.10, 0.60). Candidate for merge or optimization
+  🔄 MERGE  spam-generator          score=0.3094  conf=0.500
+         → merge target: old-summarizer
+         Score 0.309 in [retire, keep) range [0.10, 0.60). Candidate for merge or optimization →...
+  🔄 MERGE  broken-regex            score=0.2962  conf=0.841
+         Score 0.296 in [retire, keep) range [0.10, 0.60). Candidate for merge or optimization
+  🔄 MERGE  deprecated-api-v1       score=0.2493  conf=0.661
+         → merge target: basic-search
+         Score 0.249 in [retire, keep) range [0.10, 0.60). Candidate for merge or optimization →...
+  🔄 MERGE  zombie-tool             score=0.1690  conf=0.417
+         → merge target: broken-regex
+         Score 0.169 in [retire, keep) range [0.10, 0.60). Candidate for merge or optimization →...
+  🔄 MERGE  ghost-skill             score=0.1617  conf=0.339
+         → merge target: basic-search
+         Score 0.162 in [retire, keep) range [0.10, 0.60). Candidate for merge or optimization →...
+  🔄 MERGE  dead-weight             score=0.1500  conf=0.000
+         → merge target: old-summarizer
+         Score 0.150 in [retire, keep) range [0.10, 0.60). Candidate for merge or optimization →...
+
+========================================================================
+  Iteration 2: RL Feedback + Policy Adjustment
+========================================================================
+
+  RL adjustment: Low retire rate (0%) → raised retire_threshold to 0.150; High merge rate (60%) → lowered merge_threshold to 0.270
+  Pool after retirements: 15 skills (was 15)
+
+  New policy: keep≥0.600 | merge=[0.150, 0.600) | retire<0.150
+
+  Skill                   Success   Effici   Recenc    Uniqu    Compr   Curatr    TOTAL
+  ---------------------- -------- -------- -------- -------- -------- -------- --------
+  search-engine             0.960    0.432    1.000    0.000    0.850    0.920    0.700
+  code-review               0.900    0.377    1.000    0.000    0.800    0.880    0.662
+  summarizer                0.886    0.358    1.000    0.000    0.750    0.850    0.646
+  translator-en-zh          0.840    0.307    1.000    0.000    0.650    0.700    0.591
+  web-scraper               0.800    0.278    1.000    0.000    0.550    0.650    0.558
+  debug-helper              0.750    0.259    1.000    0.000    0.600    0.680    0.551
+  old-summarizer            0.600    0.162    0.871    0.000    0.350    0.400    0.408
+  text-formatter            0.600    0.182    0.616    0.000    0.280    0.350    0.359
+  basic-search              0.500    0.145    0.724    0.000    0.300    0.380    0.349
+  spam-generator            0.333    0.050    0.370    0.000    0.030    0.050    0.159
+  broken-regex              0.250    0.068    0.294    0.000    0.080    0.120    0.146
+  deprecated-api-v1         0.200    0.059    0.137    0.000    0.050    0.080    0.099
+  zombie-tool               0.000    0.034    0.064    0.000    0.010    0.010    0.019
+  ghost-skill               0.000    0.034    0.016    0.000    0.010    0.010    0.012
+  dead-weight               0.000    0.000    0.000    0.000    0.000    0.000    0.000
+
+  ✅ KEEP:  6
+  🔄 MERGE: 8
+  ❌ RETIRE: 1
+
+  Decisions:
+  ✅ KEEP   search-engine           score=0.8495  conf=1.000
+         Score 0.850 >= keep_threshold 0.60. Signals: success=0.96, efficiency=0.43, recency=1.00
+  ✅ KEEP   code-review             score=0.8125  conf=1.000
+         Score 0.812 >= keep_threshold 0.60. Signals: success=0.90, efficiency=0.38, recency=1.00
+  ✅ KEEP   summarizer              score=0.7955  conf=1.000
+         Score 0.796 >= keep_threshold 0.60. Signals: success=0.89, efficiency=0.36, recency=1.00
+  ✅ KEEP   translator-en-zh        score=0.7414  conf=0.999
+         Score 0.741 >= keep_threshold 0.60. Signals: success=0.84, efficiency=0.31, recency=1.00
+  ✅ KEEP   web-scraper             score=0.7082  conf=1.000
+         Score 0.708 >= keep_threshold 0.60. Signals: success=0.80, efficiency=0.28, recency=1.00
+  ✅ KEEP   debug-helper            score=0.7013  conf=0.997
+         Score 0.701 >= keep_threshold 0.60. Signals: success=0.75, efficiency=0.26, recency=1.00
+  🔄 MERGE  old-summarizer          score=0.5581  conf=0.982
+         Score 0.558 in [retire, keep) range [0.15, 0.60). Candidate for merge or optimization
+  🔄 MERGE  text-formatter          score=0.5093  conf=0.912
+         → merge target: old-summarizer
+         Score 0.509 in [retire, keep) range [0.15, 0.60). Candidate for merge or optimization →...
+  🔄 MERGE  basic-search            score=0.4995  conf=0.953
+         Score 0.499 in [retire, keep) range [0.15, 0.60). Candidate for merge or optimization
+  🔄 MERGE  spam-generator          score=0.3094  conf=0.500
+         → merge target: old-summarizer
+         Score 0.309 in [retire, keep) range [0.15, 0.60). Candidate for merge or optimization →...
+  🔄 MERGE  broken-regex            score=0.2962  conf=0.841
+         Score 0.296 in [retire, keep) range [0.15, 0.60). Candidate for merge or optimization
+  🔄 MERGE  deprecated-api-v1       score=0.2493  conf=0.661
+         → merge target: basic-search
+         Score 0.249 in [retire, keep) range [0.15, 0.60). Candidate for merge or optimization →...
+  🔄 MERGE  zombie-tool             score=0.1690  conf=0.417
+         → merge target: broken-regex
+         Score 0.169 in [retire, keep) range [0.15, 0.60). Candidate for merge or optimization →...
+  🔄 MERGE  ghost-skill             score=0.1617  conf=0.339
+         → merge target: basic-search
+         Score 0.162 in [retire, keep) range [0.15, 0.60). Candidate for merge or optimization →...
+  ❌ RETIRE  dead-weight             score=0.1500  conf=0.000
+         Score 0.150 < retire_threshold 0.15. Low quality and/or unused — recommended for retire...
+
+========================================================================
+  Iteration 3: Final Curation Pass
+========================================================================
+
+  RL adjustment: Low retire rate (7%) → raised retire_threshold to 0.200; High merge rate (53%) → lowered merge_threshold to 0.250
+  Pool after retirements: 14 skills (was 15)
+
+  New policy: keep≥0.600 | merge=[0.200, 0.600) | retire<0.200
+
+  Skill                   Success   Effici   Recenc    Uniqu    Compr   Curatr    TOTAL
+  ---------------------- -------- -------- -------- -------- -------- -------- --------
+  search-engine             0.960    0.432    1.000    0.000    0.850    0.920    0.700
+  code-review               0.900    0.377    1.000    0.000    0.800    0.880    0.662
+  summarizer                0.886    0.358    1.000    0.000    0.750    0.850    0.646
+  translator-en-zh          0.840    0.307    1.000    0.000    0.650    0.700    0.591
+  web-scraper               0.800    0.278    1.000    0.000    0.550    0.650    0.558
+  debug-helper              0.750    0.259    1.000    0.000    0.600    0.680    0.551
+  old-summarizer            0.600    0.162    0.871    0.000    0.350    0.400    0.408
+  text-formatter            0.600    0.182    0.616    0.000    0.280    0.350    0.359
+  basic-search              0.500    0.145    0.724    0.000    0.300    0.380    0.349
+  spam-generator            0.333    0.050    0.370    0.000    0.030    0.050    0.159
+  broken-regex              0.250    0.068    0.294    0.000    0.080    0.120    0.146
+  deprecated-api-v1         0.200    0.059    0.137    0.000    0.050    0.080    0.099
+  zombie-tool               0.000    0.034    0.064    0.000    0.010    0.010    0.019
+  ghost-skill               0.000    0.034    0.016    0.000    0.010    0.010    0.012
+
+  ✅ KEEP:  6
+  🔄 MERGE: 6
+  ❌ RETIRE: 2
+
+  Decisions:
+  ✅ KEEP   search-engine           score=0.8495  conf=1.000
+         Score 0.850 >= keep_threshold 0.60. Signals: success=0.96, efficiency=0.43, recency=1.00
+  ✅ KEEP   code-review             score=0.8125  conf=1.000
+         Score 0.812 >= keep_threshold 0.60. Signals: success=0.90, efficiency=0.38, recency=1.00
+  ✅ KEEP   summarizer              score=0.7955  conf=1.000
+         Score 0.796 >= keep_threshold 0.60. Signals: success=0.89, efficiency=0.36, recency=1.00
+  ✅ KEEP   translator-en-zh        score=0.7414  conf=0.999
+         Score 0.741 >= keep_threshold 0.60. Signals: success=0.84, efficiency=0.31, recency=1.00
+  ✅ KEEP   web-scraper             score=0.7082  conf=1.000
+         Score 0.708 >= keep_threshold 0.60. Signals: success=0.80, efficiency=0.28, recency=1.00
+  ✅ KEEP   debug-helper            score=0.7013  conf=0.997
+         Score 0.701 >= keep_threshold 0.60. Signals: success=0.75, efficiency=0.26, recency=1.00
+  🔄 MERGE  old-summarizer          score=0.5581  conf=0.982
+         Score 0.558 in [retire, keep) range [0.20, 0.60). Candidate for merge or optimization
+  🔄 MERGE  text-formatter          score=0.5093  conf=0.912
+         → merge target: old-summarizer
+         Score 0.509 in [retire, keep) range [0.20, 0.60). Candidate for merge or optimization →...
+  🔄 MERGE  basic-search            score=0.4995  conf=0.953
+         Score 0.499 in [retire, keep) range [0.20, 0.60). Candidate for merge or optimization
+  🔄 MERGE  spam-generator          score=0.3094  conf=0.500
+         → merge target: old-summarizer
+         Score 0.309 in [retire, keep) range [0.20, 0.60). Candidate for merge or optimization →...
+  🔄 MERGE  broken-regex            score=0.2962  conf=0.841
+         Score 0.296 in [retire, keep) range [0.20, 0.60). Candidate for merge or optimization
+  🔄 MERGE  deprecated-api-v1       score=0.2493  conf=0.661
+         → merge target: basic-search
+         Score 0.249 in [retire, keep) range [0.20, 0.60). Candidate for merge or optimization →...
+  ❌ RETIRE  zombie-tool             score=0.1690  conf=0.417
+         Score 0.169 < retire_threshold 0.20. Low quality and/or unused — recommended for retire...
+  ❌ RETIRE  ghost-skill             score=0.1617  conf=0.339
+         Score 0.162 < retire_threshold 0.20. Low quality and/or unused — recommended for retire...
+
+========================================================================
+  Curation Summary — Improvement Over Iterations
+========================================================================
+
+  ┌─────────────────┬──────────┬──────────┬──────────┐
+  │ Metric          │ Iter 1   │ Iter 2   │ Iter 3   │
+  ├─────────────────┼──────────┼──────────┼──────────┤
+  │ Pool size       │       15 │       15 │       14 │
+  │ Avg score (all) │   0.5007 │   0.5007 │   0.5258 │
+  │ Avg score (keep)│   0.7681 │   0.7681 │   0.7681 │
+  │ ✅ Keep          │        6 │        6 │        6 │
+  │ 🔄 Merge         │        9 │        8 │        6 │
+  │ ❌ Retire        │        0 │        1 │        2 │
+  └─────────────────┴──────────┴──────────┴──────────┘
+
+  Trend: Pool shrinks from 15 → 15 → 14 skills
+  Average kept-skill score: 0.7681 → 0.7681 → 0.7681
+  ~ Pool quality stable
+
+
+========================================================================
+  Merge Target Analysis
+========================================================================
+
+  Skills identified for merging:
+    • deprecated-api-v1 → basic-search
+      (both in similar quality range, potential consolidation)
+    • ghost-skill → basic-search
+      (both in similar quality range, potential consolidation)
+    • zombie-tool → broken-regex
+      (both in similar quality range, potential consolidation)
+    • text-formatter → old-summarizer
+      (both in similar quality range, potential consolidation)
+    • spam-generator → old-summarizer
+      (both in similar quality range, potential consolidation)
+    • dead-weight → old-summarizer
+      (both in similar quality range, potential consolidation)
+
+========================================================================
+  Confidence Analysis
+========================================================================
+
+  Score confidence is based on data volume (sigmoid of call count):
+  min_calls_for_confidence: 3
+
+  search-engine          █████████████████████████████░ 1.000  (50 calls)
+  code-review            █████████████████████████████░ 1.000  (40 calls)
+  summarizer             █████████████████████████████░ 1.000  (35 calls)
+  web-scraper            █████████████████████████████░ 1.000  (30 calls)
+  translator-en-zh       █████████████████████████████░ 0.999  (25 calls)
+  debug-helper           █████████████████████████████░ 0.997  (20 calls)
+  old-summarizer         █████████████████████████████░ 0.982  (15 calls)
+  basic-search           ████████████████████████████░░ 0.953  (12 calls)
+  text-formatter         ███████████████████████████░░░ 0.912  (10 calls)
+  broken-regex           █████████████████████████░░░░░ 0.841  (8 calls)
+  deprecated-api-v1      ███████████████████░░░░░░░░░░░ 0.661  (5 calls)
+  spam-generator         ███████████████░░░░░░░░░░░░░░░ 0.500  (3 calls)
+  zombie-tool            ████████████░░░░░░░░░░░░░░░░░░ 0.417  (2 calls)
+  ghost-skill            ██████████░░░░░░░░░░░░░░░░░░░░ 0.339  (1 calls)
+  dead-weight            ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.000  (0 calls)
+
+========================================================================
+  Demo Complete
+========================================================================
+
+  Key Takeaways:
+  1. SkillOSAdapter correctly identifies high/low quality skills
+  2. Multi-dimensional scoring (6 signals) provides nuanced decisions
+  3. RL policy adjustment converges — each iteration refines thresholds
+  4. Pool quality improves as mediocre/failed skills are retired
+  5. Merge detection identifies consolidation opportunities
+  6. Confidence scoring prevents premature decisions on under-sampled skills
+

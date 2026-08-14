@@ -179,12 +179,18 @@ class DeepSeekProvider:
                         break
                     try:
                         data = json.loads(data_str)
-                        delta = data["choices"][0].get("delta", {})
+                        choices = data.get("choices", [])
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta", {})
                         token = delta.get("content", "")
+                        # 推理模型: content可能在reasoning_content里
+                        if not token:
+                            token = delta.get("reasoning_content", "")
                         if token:
                             full_content += token
                             on_token(token)
-                    except (json.JSONDecodeError, KeyError):
+                    except (json.JSONDecodeError, KeyError, IndexError):
                         continue
             response = ModelResponse(
                 content=full_content,
@@ -452,6 +458,15 @@ def create_provider(provider_type: str = DEFAULT_PROVIDER, **kwargs) -> Any:
         config.api_key = kwargs.get("api_key", "ollama")
         config.model = kwargs.get("model", "qwen3.5:9b")
         logger.info(f"Ollama provider: {config.model} @ {config.endpoint}")
+        return DeepSeekProvider(config)
+
+    if provider_type == "mimo":
+        config.endpoint = kwargs.get("endpoint", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions")
+        config.api_key = kwargs.get("api_key", "")
+        config.model = kwargs.get("model", "MiMo-v2.5")
+        if not config.api_key:
+            raise ValueError("mimo需要api_key参数")
+        logger.info(f"mimo provider: {config.model} @ {config.endpoint}")
         return DeepSeekProvider(config)
 
     if provider_type == "deepseek":

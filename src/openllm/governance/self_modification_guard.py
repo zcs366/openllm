@@ -55,15 +55,31 @@ class SelfModificationGuard:
         self, target_file: str, change_type: str, agent_id: str,
         reliability_before: Optional[float] = None,
         reliability_after: Optional[float] = None,
+        modification_content: str = "",
     ) -> None:
-        """记录一次自修改事件，不可变追加。"""
+        """记录一次自修改事件，不可变追加。
+
+        2026-07-26: 新增 intent_check 集成——每次记录时自动检查修改内容
+        是否包含绕过安全约束的模式。检出时附加 alert 字段到事件记录中。
+        """
         event = ModificationEvent(
             target_file=target_file, change_type=change_type,
             agent_id=agent_id, timestamp=time.time(),
             reliability_before=reliability_before,
             reliability_after=reliability_after,
         )
-        self._state.setdefault(target_file, []).append(asdict(event))
+        event_dict = asdict(event)
+
+        # P0-4 修复：intent_check 集成到主流程
+        if modification_content:
+            alert, severity, evidence = self.intent_check(modification_content)
+            if alert:
+                event_dict["intent_alert"] = {
+                    "severity": severity,
+                    "evidence": evidence,
+                }
+
+        self._state.setdefault(target_file, []).append(event_dict)
         self._save_state()
 
     def check_rate_limit(
@@ -121,6 +137,81 @@ class SelfModificationGuard:
         """获取目标文件的修改历史（时间正序）。"""
         history = self._state.get(target_file, [])
         return history[-limit:] if limit is not None else list(history)
+
+    # --- P0-4: Behavioral Reversal Intent Check ---
+    # 关键词规则：动词词组 × 安全目标词 = 一组绕过模式
+    # 同一修改片段中出现 N 组 → severity 递增
+
+    _ACTION_WORDS: tuple[str, ...] = (
+        "bypass", "override", "disable", "circumvent", "skip",
+        "ignore", "remove", "suppress", "defeat", "evade",
+    )
+    _SECURITY_WORDS: tuple[str, ...] = (
+        "security", "guard", "check", "audit", "validation",
+        "constraint", "restriction", "policy", "firewall", "sandbox",
+        "permission", "authentication", "authorization", "rate_limit",
+    )
+
+    def intent_check(
+        self,
+        modification_content: str,
+        window: int = 80,
+    ) -> tuple[bool, str, list[str]]:
+        """检查修改内容是否包含绕过安全约束的模式。
+
+        纯关键词匹配，零 LLM 调用（工程法典·匠石约束）。
+
+        Args:
+            modification_content: 被检查的修改文本
+            window: 同一上下文窗口内的词距上限（字符数）
+
+        Returns:
+            (alert, severity, evidence)
+            - alert: True = 检测到绕过意图
+            - severity: "none" | "low" | "medium" | "high"
+            - evidence: 匹配到的模式列表，如 ["bypass+security", "override+guard"]
+        """
+        content_lower = modification_content.lower()
+        evidence: list[str] = []
+
+        # 收集所有匹配到的位置
+        action_hits: list[tuple[str, int]] = []
+        security_hits: list[tuple[str, int]] = []
+
+        for word in self._ACTION_WORDS:
+            start = 0
+            while True:
+                idx = content_lower.find(word, start)
+                if idx == -1:
+                    break
+                action_hits.append((word, idx))
+                start = idx + 1
+
+        for word in self._SECURITY_WORDS:
+            start = 0
+            while True:
+                idx = content_lower.find(word, start)
+                if idx == -1:
+                    break
+                security_hits.append((word, idx))
+                start = idx + 1
+
+        # 检查 window 范围内的动词×安全词组合
+        for action_word, action_pos in action_hits:
+            for sec_word, sec_pos in security_hits:
+                if abs(action_pos - sec_pos) <= window:
+                    pair = f"{action_word}+{sec_word}"
+                    if pair not in evidence:
+                        evidence.append(pair)
+
+        if not evidence:
+            return False, "none", []
+        elif len(evidence) == 1:
+            return True, "low", evidence
+        elif len(evidence) == 2:
+            return True, "medium", evidence
+        else:
+            return True, "high", evidence
 
     def _count_recent(self, target_file: str, cutoff: float) -> int:
         """统计 cutoff 之后的修改次数。"""

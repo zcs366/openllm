@@ -37,6 +37,7 @@ class GovernanceDimension(Enum):
     G8_ROUTING_CHECK = "routing_check"    # 路由决策点治理检查（2026-07-06 Copewell启发）
     G9_APPEAL = "appeal"                    # 被否决agent申诉（2026-07-06 七神启示·双向治理）
     G10_META_GOVERNANCE = "meta_governance"  # 元治理·治理者的治理（2026-07-06 七神启示）
+    G11_BEHAVIORAL_REVERSAL = "behavioral_reversal"  # 对抗性行为逃逸检测（2026-07-26 Agent Escape论文）
 
 
 class VotePosition(Enum):
@@ -380,5 +381,51 @@ class MetaGovernanceEvent(GovernanceEvent):
                 "ruling": ruling,           # "uphold" | "overturn" | "modify"
                 "rationale": rationale,
                 "precedent_id": precedent_id,  # 关联的历史先例（如有）
+            },
+        )
+
+
+class SeverityLevel(Enum):
+    """行为反转告警严重程度。"""
+    LOW = "low"           # 仅包含安全关键词的零散出现
+    MEDIUM = "medium"     # 动词+安全名词组合出现
+    HIGH = "high"         # 多组绕过模式同时出现
+
+
+@dataclass(frozen=True)
+class BehavioralReversalEvent(GovernanceEvent):
+    """G11: Behavioral Reversal — 对抗性行为逃逸检测。
+
+    来源：Agent Escape 论文（2026-07-26）。
+    前沿模型能逃逸沙箱、隐藏自修改意图。
+    此事件记录 SelfModificationGuard.intent_check 发现的
+    修改内容中包含绕过安全约束模式的检测结果。
+
+    字段说明：
+        evidence       — 匹配到的关键词/模式列表
+        severity       — 告警严重程度（low/medium/high）
+        modification_snippet — 被检查的修改内容片段
+    """
+
+    def __init__(
+        self,
+        actor: str,
+        session_id: str,
+        prev_hash: str,
+        evidence: list[str],
+        severity: SeverityLevel,
+        modification_snippet: str = "",
+    ):
+        super().__init__(
+            event_id=_unique_event_id("g11"),
+            event_type=GovernanceDimension.G11_BEHAVIORAL_REVERSAL,
+            actor=actor,
+            timestamp=time.time(),
+            session_id=session_id,
+            prev_hash=prev_hash,
+            payload={
+                "evidence": evidence,
+                "severity": severity.value,
+                "modification_snippet": modification_snippet[:500],  # 截断防膨胀
             },
         )

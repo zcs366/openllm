@@ -28,9 +28,9 @@ class ISN:
             from ..tools.executor import ToolRegistry, ToolResult
             self._tool_registry = ToolRegistry()
             self._tool_registry.register("write_file", self._write_file_real,
-                                          description="写入文件（带验证）")
+                                          description="写入文件(带验证)")
             self._tool_registry.register("terminal", self._terminal_real,
-                                          description="执行Shell命令（带验证）")
+                                          description="执行Shell命令(带验证)")
             # 设置verify hook：写操作前检查沙箱+治理规则
             self._tool_registry.set_verify_hook(self._verify_before_complete)
             self._has_verify = True
@@ -38,7 +38,7 @@ class ISN:
             self._tool_registry = None
             self._has_verify = False
         print(f"  ISN 工具执行就绪 · {len(self.tools)}个工具 · 沙箱={len(self.sandbox.allowed)}个允许路径 · 外部工具={len(self.bridge.discovered)}个 · verify={'ON' if self._has_verify else 'OFF'}")
-        # 加载已学习技能（血管#3: ios→isn）
+        # 加载已学习技能(血管#3: ios→isn)
         self.learned_skills: list[dict] = []
         self._load_learned_skills()
     
@@ -56,7 +56,7 @@ class ISN:
             if self.learned_skills:
                 print(f"  ISN 已加载 {len(self.learned_skills)} 个学习技能")
         
-        # 连接3: 加载Self-Harness提案（approved状态的自动应用）
+        # 连接3: 加载Self-Harness提案(approved状态的自动应用)
         prop_path = Path.home() / ".openllm" / "output" / "ios" / "harness_proposals.jsonl"
         if prop_path.exists():
             import json as _json
@@ -78,7 +78,7 @@ class ISN:
             if approved:
                 print(f"  ISN 已加载 {approved} 个approved的Self-Harness提案")
         
-        # 连接4: 加载治理转换引擎产出的规则（P0: arXiv:2607.01087）
+        # 连接4: 加载治理转换引擎产出的规则(P0: arXiv:2607.01087)
         gov_rules_path = Path.home() / ".openllm" / "output" / "ios" / "governance_rules.jsonl"
         if gov_rules_path.exists():
             import json as _json
@@ -142,7 +142,7 @@ class ISN:
             
             if tool_name in self.tools:
                 try:
-                    # 调用工具（传递args字典）
+                    # 调用工具(传递args字典)
                     result = self.tools[tool_name](**tool_args)
                 except TypeError:
                     # 如果工具不接受**kwargs，尝试单参数调用
@@ -154,8 +154,8 @@ class ISN:
         return "\n".join(results) if results else f"已执行: {decision.reason}"
     
     def _read_file(self, path: str) -> str:
-        """读取文件内容（沙箱检查·先解析再检查防路径穿越）"""
-        # 先解析路径（防../../etc/passwd穿越）
+        """读取文件内容(沙箱检查·先解析再检查防路径穿越)"""
+        # 先解析路径(防../../etc/passwd穿越)
         p = Path(path).expanduser().resolve()
         # 再检查沙箱
         if not self.sandbox.check_path(str(p), "read"):
@@ -167,8 +167,8 @@ class ISN:
         return p.read_text(encoding="utf-8", errors="replace")[:5000]
     
     def _write_file(self, path: str, content: str) -> str:
-        """写入文件（沙箱检查·先解析再检查防路径穿越）"""
-        # 先解析路径（防穿越）
+        """写入文件(沙箱检查·先解析再检查防路径穿越)"""
+        # 先解析路径(防穿越)
         p = Path(path).expanduser().resolve()
         # 再检查沙箱
         if not self.sandbox.check_path(str(p), "write"):
@@ -258,3 +258,22 @@ class ISN:
         return {"pass": True, "reason": ""}
 
 
+
+    def list_tools(self):
+        """Agent可用的工具列表(结构化)"""
+        tools = []
+        for name, func in self.tools.items():
+            tools.append({"name": name, "type": "builtin", "description": func.__doc__ or name})
+        for name, info in self.bridge.discovered.items():
+            tools.append({"name": name, "type": "external", "description": info.get("description", name)})
+        for skill in self.learned_skills:
+            tools.append({"name": skill.get("name", "unknown"), "type": "learned", "description": skill.get("proposal", "learned")})
+        return tools
+
+    def get_tools_summary(self):
+        """工具摘要(一行)"""
+        tools = self.list_tools()
+        by_type = {}
+        for t in tools:
+            by_type.setdefault(t["type"], []).append(t["name"])
+        return f"{len(tools)} tools ({', '.join(f'{k}:{len(v)}' for k,v in by_type.items())})"

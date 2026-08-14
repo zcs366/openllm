@@ -28,8 +28,11 @@ class UsageRecord:
 DEFAULT_PRICES: dict[str, tuple[float, float]] = {
     "gpt-4o":        (2.50, 10.00),
     "gpt-4o-mini":   (0.15,  0.60),
-    "deepseek-chat": (0.14,  0.28),
-    "deepseek-coder":(0.14,  0.28),
+    "deepseek-chat": (0.27,  1.10),
+    "deepseek-coder":(0.27,  1.10),
+    "deepseek-v3":   (0.27,  1.10),
+    "qwen":          (0.14,  0.28),
+    "mimo":          (0.00,  0.00),
 }
 
 class TokenEconomy:

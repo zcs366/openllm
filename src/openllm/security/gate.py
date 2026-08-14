@@ -111,6 +111,7 @@ class PermissionGate:
         "plan": PermissionLevel.PLAN,
         "thought": PermissionLevel.PLAN,
         "reason": PermissionLevel.PLAN,
+        "risk_check": PermissionLevel.PLAN,  # 风险评估是只读操作
         # L1 只读
         "read_file": PermissionLevel.READ_ONLY,
         "search": PermissionLevel.READ_ONLY,
