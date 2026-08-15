@@ -45,7 +45,8 @@ def build_system_prompt(tools_list: list, identity: str, mem_ctx: dict) -> str:
         parts.append("调用方式：在```python代码块中调用工具函数，系统会自动执行。\n")
         for t in tools_list:
             parts.append(f"- {t['name']}: {t['description']}")
-        parts.append("\n示例：用户说'读取某文件'→ 用read_file(\"路径\")；用户说'运行命令'→ 用terminal(\"命令\")")
+        parts.append("\n示例：用户说'读取某文件'→ 用read_file(\"路径\")；用户说'运行命令'→ 用terminal(\"命令\")；用户说'搜索XX'→ 用hermes_search(\"关键词\")")
+        parts.append("\n**重要：遇到事实性问题（论文、技术、数据）必须先用hermes_search搜索，不要凭记忆回答。**")
     if mem_ctx.get("status") != "empty":
         decisions = mem_ctx.get("decisions", [])
         if decisions:

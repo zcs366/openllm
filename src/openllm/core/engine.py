@@ -630,6 +630,29 @@ class OpenLLMEngine:
             response = "\n\n".join(accumulated_text)
 
         self._history.append(Message(role="assistant", content=response))
+
+        # ── 因果记忆自动写入（即使没有工具调用也记录）──
+        # 解决AutoCausalWriter只在工具执行后触发的问题
+        try:
+            from ..memory.auto_causal_writer import AutoCausalWriter
+            writer = AutoCausalWriter()
+            # 提取原始用户问题（去掉记忆前缀）
+            raw_question = user_input
+            if "[用户问题]" in raw_question:
+                raw_question = raw_question.split("[用户问题]")[-1].strip()
+            elif "[持久记忆]" in raw_question:
+                raw_question = raw_question.split("\n\n")[-1].strip()
+
+            writer.record(
+                action=f"chat: {raw_question[:80]}",
+                prediction="模型会基于记忆和知识回答",
+                actual=response[:200],
+                success=bool(response and len(response) > 10),
+                context=f"tools_used={tool_rounds}",
+            )
+        except Exception as e:
+            logger.debug(f"因果记忆写入跳过: {e}")
+
         return response
 
     def _detect_tool_call(self, text: str) -> Optional[tuple]:
