@@ -582,6 +582,11 @@ class OpenLLMEngine:
 
         while tool_rounds < self.MAX_TOOL_ROUNDS:
             tool_call = self._detect_tool_call(response)
+            
+            # Tool Router fallback：MiMo不生成代码块时，从自然语言提取意图
+            if not tool_call:
+                tool_call = self._tool_router_route(response)
+            
             if not tool_call:
                 break
 
@@ -689,6 +694,25 @@ class OpenLLMEngine:
                 if result:
                     return result
 
+        return None
+
+    def _tool_router_route(self, text: str) -> Optional[tuple]:
+        """Tool Router fallback：从自然语言中提取工具调用意图。
+        
+        当_detect_tool_call（正则匹配```python代码块）失败时，
+        用ToolRouter从自然语言中解析意图。这是MiMo等非function-calling模型的
+        主要工具调用路径。
+        """
+        try:
+            from .tool_router import ToolRouter
+            router = ToolRouter(engine=self)
+            result = router.route(text)
+            if result.routed and result.tool_call:
+                tc = result.tool_call
+                logger.info(f"ToolRouter路由: {tc.name}({tc.params}) confidence={tc.confidence}")
+                return (tc.name, tc.params)
+        except Exception as e:
+            logger.debug(f"ToolRouter跳过: {e}")
         return None
 
     def _extract_args_from_code(self, code: str, tool_name: str) -> dict:
