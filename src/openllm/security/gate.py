@@ -128,6 +128,7 @@ class PermissionGate:
         # L3 网络
         "api_call": PermissionLevel.NETWORK,
         "web_search": PermissionLevel.NETWORK,
+        "hermes_search": PermissionLevel.NETWORK,
         "send_message": PermissionLevel.NETWORK,
         "publish": PermissionLevel.NETWORK,
         # L4 管理模式

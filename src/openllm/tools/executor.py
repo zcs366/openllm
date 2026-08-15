@@ -294,6 +294,57 @@ def create_default_tools() -> ToolRegistry:
             "target": {"type": "string"}, "timeout": {"type": "integer"},
         }, "required": ["action"]})
 
+    # ── hermes_search v7.0（主力搜索引擎）──────────────────────────
+    def tool_hermes_search(query: str = "", sources: str = "", max_results: int = 5, **kwargs) -> str:
+        """Hermes Search v7.0——12后端多源聚合搜索引擎。支持知乎/B站/arXiv/Google Scholar等。"""
+        import json as _json
+        import sys as _sys
+        _sys.path.insert(0, "/home/zcs/search-engine")
+        try:
+            from hermes_search import search_web, search_arxiv, search_cnscrape
+        except ImportError as e:
+            return _json.dumps({"error": f"hermes_search模块未安装: {e}"})
+
+        if not query:
+            return _json.dumps({"error": "query参数不能为空"})
+
+        source_list = [s.strip() for s in sources.split(",") if s.strip()] if sources else ["cnscrape"]
+        all_results = []
+
+        for src in source_list:
+            try:
+                if src == "arxiv":
+                    results = search_arxiv(query, max_results=max_results)
+                elif src == "cnscrape":
+                    results = search_cnscrape(query, max_results=max_results)
+                else:
+                    results = search_web(query, max_results=max_results)
+                all_results.extend(results)
+            except Exception as e:
+                all_results.append({"title": f"[{src}错误]", "url": "", "description": str(e)})
+
+        # 去重（按URL）
+        seen_urls = set()
+        unique = []
+        for r in all_results:
+            url = r.url if hasattr(r, 'url') else r.get('url', '')
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                if hasattr(r, '__dict__'):
+                    unique.append({"title": r.title, "url": r.url, "description": r.snippet[:200]})
+                else:
+                    unique.append(r)
+
+        return _json.dumps({"query": query, "sources": source_list, "results": unique[:max_results]}, ensure_ascii=False)
+
+    registry.register("hermes_search", tool_hermes_search,
+        "Hermes Search v7.0——多源聚合搜索(cnscrape/arXiv/web)",
+        schema={"type": "object", "properties": {
+            "query": {"type": "string", "description": "搜索关键词"},
+            "sources": {"type": "string", "description": "搜索源，逗号分隔(cnscrape,arxiv,web)"},
+            "max_results": {"type": "integer", "description": "最大结果数", "default": 5},
+        }, "required": ["query"]})
+
     # ── tool_failure_log（失败驱动工具发现）──────────────────────────
     def tool_failure_log(action: str = "health", **kwargs) -> str:
         """工具失败日志——记录失败→统计频率→提取需求信号。只有失败的才是真需求。"""

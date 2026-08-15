@@ -73,6 +73,7 @@ class AgentConfig:
     max_context_tokens: int = 8192
     checkpoint_interval: int = 10  # 每N轮自动checkpoint
     enable_io_s_checkpoint: bool = True
+    security_level: int = 2  # 0=PLAN, 1=READ_ONLY, 2=LOCAL_WRITE, 3=NETWORK, 4=ADMIN
 
 
 class OpenLLMEngine:
@@ -98,6 +99,9 @@ class OpenLLMEngine:
         self.loop = AgentLoop(max_context_tokens=config.max_context_tokens)
         self.memory = MemoryOS(Path(config.capsule_dir))
         self.security = SecurityFoundation(Path(config.capsule_dir))
+        # 设置权限级别（0=PLAN, 1=READ_ONLY, 2=LOCAL_WRITE, 3=NETWORK, 4=ADMIN）
+        from ..security.gate import PermissionLevel
+        self.security.gate.current_level = PermissionLevel(config.security_level)
         self.tools = create_default_tools()
         
         # ISN Tool Registry Bridge（动态工具注册）
