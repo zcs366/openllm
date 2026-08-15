@@ -516,27 +516,45 @@ class OpenLLMEngine:
         if not ok:
             return reason
 
+        # P1-3: 记忆注入——从UnifiedMemory KV存储检索，prepend到用户消息
+        # 修复v2：记忆注入必须在history.append之前，否则模型看到的是 memory→question 顺序
+        memory_context = ""
+        try:
+            kv_keys = self.unified_memory.list_keys()
+            kv_parts = []
+            for k in kv_keys:
+                v = self.unified_memory.recall(k)
+                if v is not None:
+                    val_str = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+                    kv_parts.append(f"[{k}] {val_str}")
+            if kv_parts:
+                memory_context = "\n".join(kv_parts)
+        except Exception as e:
+            logger.debug(f"KV记忆读取跳过: {e}")
+
+        if not memory_context:
+            try:
+                mem_ctx = self.memory.read()
+                if mem_ctx.get("status") == "restored":
+                    mem_parts = []
+                    decisions = mem_ctx.get("decisions", [])
+                    insights = mem_ctx.get("insights", [])
+                    if decisions:
+                        mem_parts.append("过去决策: " + "; ".join(decisions[:3]))
+                    if insights:
+                        mem_parts.append("过去洞察: " + "; ".join(insights[:2]))
+                    if mem_parts:
+                        memory_context = " | ".join(mem_parts)
+            except Exception as e:
+                logger.debug(f"Capsule记忆读取跳过: {e}")
+
+        # 将记忆prepend到用户消息（模型在history中看到 memory→question 顺序）
+        if memory_context:
+            user_input = f"[持久记忆]\n{memory_context}\n\n[用户问题]\n{user_input}"
+
         # Agent Loop: plan
         ctx = self.loop.turn(user_input)
         self._history.append(Message(role="user", content=user_input))
-
-        # P1-3: 记忆注入——从MemoryOS检索相关记忆注入prompt
-        try:
-            mem_ctx = self.memory.read()
-            if mem_ctx.get("status") == "restored":
-                mem_parts = []
-                decisions = mem_ctx.get("decisions", [])
-                insights = mem_ctx.get("insights", [])
-                if decisions:
-                    mem_parts.append("过去决策: " + "; ".join(decisions[:3]))
-                if insights:
-                    mem_parts.append("过去洞察: " + "; ".join(insights[:2]))
-                if mem_parts:
-                    memory_injection = "[记忆上下文] " + " | ".join(mem_parts)
-                    # 用user角色注入记忆，避免多system消息导致Ollama混淆
-                    self._history.append(Message(role="user", content=memory_injection))
-        except Exception as e:
-            logger.debug(f"记忆注入跳过: {e}")
 
         # 限制 history 长度，防止无限膨胀
         if len(self._history) > self.MAX_HISTORY_TURNS * 2:
