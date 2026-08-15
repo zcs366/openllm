@@ -469,6 +469,15 @@ def create_provider(provider_type: str = DEFAULT_PROVIDER, **kwargs) -> Any:
         logger.info(f"mimo provider: {config.model} @ {config.endpoint}")
         return DeepSeekProvider(config)
 
+    if provider_type == "qwen":
+        config.endpoint = kwargs.get("endpoint", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
+        config.api_key = kwargs.get("api_key", "")
+        config.model = kwargs.get("model", "qwen-max")
+        if not config.api_key:
+            raise ValueError("qwen需要api_key参数")
+        logger.info(f"qwen provider: {config.model} @ {config.endpoint}")
+        return DeepSeekProvider(config)  # DashScope兼容OpenAI接口
+
     if provider_type == "deepseek":
         return DeepSeekProvider(config)
     elif provider_type == "openai":

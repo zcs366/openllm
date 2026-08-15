@@ -239,17 +239,31 @@ class OpenLLMEngine:
         """初始化模型Provider。支持：deepseek/openai/anthropic/gemini/ollama。"""
         try:
             p = self.config.provider
+            endpoint = ""
             if p == "ollama":
                 api_key = "ollama"
             elif p == "mimo":
                 api_key = os.environ.get("MIMO_API_KEY", "")
                 if not api_key:
-                    # 从config.json读取
                     import json
                     cfg_path = Path.home() / ".openllm" / "config.json"
                     if cfg_path.exists():
                         cfg = json.loads(cfg_path.read_text())
                         api_key = cfg.get("providers", {}).get("mimo", {}).get("api_key", "")
+            elif p == "qwen":
+                api_key = os.environ.get("ALIBABA_PLAN_API_KEY", "")
+                endpoint = ""
+                model = "qwen3.8-max"
+                # 总是从config.json读取endpoint和model（env只有key）
+                import json
+                cfg_path = Path.home() / ".openllm" / "config.json"
+                if cfg_path.exists():
+                    cfg = json.loads(cfg_path.read_text())
+                    qw = cfg.get("providers", {}).get("qwen", {})
+                    if not api_key:
+                        api_key = qw.get("api_key", "")
+                    endpoint = qw.get("endpoint", "")
+                    model = qw.get("model", "qwen3.8-max")
             elif p == "anthropic":
                 api_key = os.environ.get("ANTHROPIC_API_KEY", "")
             elif p == "gemini":
@@ -264,6 +278,7 @@ class OpenLLMEngine:
                 self.config.provider,
                 model=self.config.model,
                 api_key=api_key,
+                **({"endpoint": endpoint} if endpoint else {}),
             )
             return True
         except Exception:
