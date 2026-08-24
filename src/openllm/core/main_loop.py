@@ -91,6 +91,20 @@ class Agent:
         # ── tool_validator 失败追踪 ──
         self._tool_failures: list[dict] = []
 
+        # ── MemoryEvaluator 因果度量（E2 缺口③·2026-08-23） ──
+        try:
+            from ..memory.memory_evaluator import MemoryEvaluator
+            self.memory_evaluator = MemoryEvaluator()
+        except Exception:
+            self.memory_evaluator = None
+
+        # ── Clock 时钟账本（E2·2026-08-23） ──
+        try:
+            from .clock import Clock
+            self.clock = Clock()
+        except Exception:
+            self.clock = None
+
         # ── 研究引擎（实验+论文+研究循环） ──
         from ..tools.research_loop import ResearchLoop
         self.research = ResearchLoop()

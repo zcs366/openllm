@@ -29,7 +29,9 @@ MemPalace启示：verbatim-first
 import json
 import math
 import time
+import uuid
 import hashlib
+import threading
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Optional, Dict, List
@@ -37,6 +39,15 @@ from enum import Enum
 import logging
 
 logger = logging.getLogger("openllm.causal_memory")
+
+
+# ── 单实例缓存 ──────────────────────────────────────
+# 同一 store_dir 只返回同一个 CausalMemoryStore 实例，
+# 消除写端(ios_causal)每次新建一次性实例导致的同session缓存分裂。
+_singleton_cache: Dict[str, "CausalMemoryStore"] = {}
+_singleton_lock = threading.Lock()
+
+DEFAULT_STORE_DIR = Path.home() / ".openllm" / "memory" / "causal"
 
 
 # ── 因果记忆条目 ──────────────────────────────────────
@@ -88,6 +99,10 @@ class CausalMemory:
     # 元数据
     tags: List[str] = field(default_factory=list)
     session_id: str = ""
+
+    # 修订链（E2 缺口①·2026-08-23）
+    superseded_by: str = ""    # 非空=此条已被新条取代（append-only标记）
+    revision_of: str = ""      # 非空=此条是某条的修订版
     
     def __post_init__(self):
         if not self.memory_id:
@@ -99,6 +114,8 @@ class CausalMemory:
         
         因果效应参与遗忘决策：delta越大=教训越深=越不该忘。
         高delta_magnitude的记忆获得额外温度保护，衰减更慢。
+        
+        E2 确认：使用真实时间间隔 (now - last_accessed)，非固定步长。
         """
         t = time.time() - self.last_accessed
         base = self.importance * math.exp(-decay_lambda * t)
@@ -170,7 +187,16 @@ class CausalMemoryStore:
     """
     
     def __init__(self, store_dir: Optional[Path] = None):
-        self.store_dir = store_dir or Path.home() / ".openllm" / "memory" / "causal"
+        resolved = Path(store_dir).resolve() if store_dir else DEFAULT_STORE_DIR.resolve()
+        
+        # 单实例缓存：同目录只构造一次，后续返回已有实例
+        cache_key = str(resolved)
+        if cache_key in _singleton_cache:
+            cached = _singleton_cache[cache_key]
+            self.__dict__.update(cached.__dict__)
+            return
+        
+        self.store_dir = resolved
         self.store_dir.mkdir(parents=True, exist_ok=True)
         
         self._memories: Dict[str, CausalMemory] = {}
@@ -179,6 +205,7 @@ class CausalMemoryStore:
         self._patterns_dir.mkdir(exist_ok=True)
         
         self._load_all()
+        _singleton_cache[cache_key] = self
         logger.info(f"✅ 因果记忆初始化: {len(self._memories)}条记忆, {len(self._patterns)}个模式")
     
     def _load_all(self):
@@ -264,6 +291,9 @@ class CausalMemoryStore:
         candidates = []
         
         for mem in self._memories.values():
+            # 修订链过滤：superseded条目不参与检索
+            if mem.superseded_by:
+                continue
             # Sleeper防御：默认不包含untrusted
             trust_val = mem.trust_level.value if hasattr(mem.trust_level, 'value') else str(mem.trust_level)
             if not include_untrusted and trust_val == "untrusted":
@@ -308,14 +338,44 @@ class CausalMemoryStore:
         return [m for m in self._memories.values() if not m.actual_success]
     
     def update_importance(self, memory_id: str, new_importance: float):
-        """更新记忆重要性（温度衰减后的手动调整）"""
-        if memory_id in self._memories:
-            self._memories[memory_id].importance = new_importance
-            path = self.store_dir / f"{memory_id}.json"
-            path.write_text(
-                json.dumps(self._memories[memory_id].to_dict(), ensure_ascii=False, indent=2),
-                encoding="utf-8"
-            )
+        """更新记忆重要性——修订链模式（E2 缺口①·2026-08-23）
+
+        原条标记 superseded_by（重写其json以追加该字段），新条带 revision_of 落独立json。
+        append-only语义：旧条内容不被修改或删除，仅追加"已被取代"的指向；历史全保留。
+        """
+        if memory_id not in self._memories:
+            return
+
+        old_mem = self._memories[memory_id]
+
+        # 1. 原条标记 superseded_by（不改 importance，保留历史值）
+        new_id = f"rev-{int(time.time()*1000)}-{uuid.uuid4().hex[:8]}"
+        old_mem.superseded_by = new_id
+        old_path = self.store_dir / f"{memory_id}.json"
+        old_path.write_text(
+            json.dumps(old_mem.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+
+        # 2. 追加新条：同内容、新 importance、revision_of、新 id
+        import copy
+        new_mem = copy.deepcopy(old_mem)
+        new_mem.memory_id = new_id
+        new_mem.created_at = time.time()
+        new_mem.importance = new_importance
+        new_mem.revision_of = memory_id
+        new_mem.superseded_by = ""  # 新条未被取代
+        new_mem.last_accessed = time.time()
+
+        new_path = self.store_dir / f"{new_id}.json"
+        new_path.write_text(
+            json.dumps(new_mem.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+
+        # 3. 更新内存索引
+        self._memories[new_id] = new_mem
+        logger.info(f"📝 修订链: {memory_id} → {new_id} | importance {old_mem.importance:.2f}→{new_importance:.2f}")
     
     def access(self, memory_id: str):
         """标记访问——加热"""
@@ -379,19 +439,38 @@ class CausalMemoryStore:
             "",
         ]
         
-        # 最近的高温度因果记忆
-        recent = sorted(self._memories.values(), key=lambda m: m.temperature(), reverse=True)[:max_entries]
+        # 最近的高温度因果记忆（过滤superseded）
+        active = [m for m in self._memories.values() if not m.superseded_by]
+        recent = sorted(active, key=lambda m: m.temperature(), reverse=True)[:max_entries]
         if recent:
             lines.append("### 高温度因果记忆:")
             for mem in recent:
                 emoji = "✅" if mem.actual_success else "❌"
                 lines.append(f"  {emoji} [{mem.action_signature[:40]}] T={mem.temperature():.2f} | {mem.lesson[:60]}")
         
-        # 最近的失败教训
-        failed = [m for m in self._memories.values() if not m.actual_success]
+        # 最近的失败教训（过滤superseded）
+        failed = [m for m in active if not m.actual_success]
         if failed:
             lines.append("### 最近失败教训:")
             for mem in sorted(failed, key=lambda m: m.created_at, reverse=True)[:3]:
                 lines.append(f"  ❌ [{mem.action_signature[:40]}] | {mem.lesson[:60]}")
         
         return "\n".join(lines)
+
+
+# ── 全局工厂函数（真·单实例入口）──────────────────────────
+
+def get_causal_store(base_dir: Optional[Path] = None) -> CausalMemoryStore:
+    """获取因果记忆存储的全局单实例。
+    
+    同一 base_dir 只返回同一个 CausalMemoryStore 实例。
+    base_dir 为 None 时使用默认路径 ~/.openllm/memory/causal。
+    
+    线程安全：模块级 dict 缓存 + threading.Lock。
+    """
+    resolved = Path(base_dir).resolve() if base_dir else DEFAULT_STORE_DIR.resolve()
+    cache_key = str(resolved)
+    with _singleton_lock:
+        if cache_key not in _singleton_cache:
+            _singleton_cache[cache_key] = CausalMemoryStore(store_dir=resolved)
+        return _singleton_cache[cache_key]

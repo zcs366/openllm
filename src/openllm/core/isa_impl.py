@@ -16,6 +16,13 @@ class ISA:
         self.display = DisplayEngine()
         # MemoryBus — 统一记忆总线（通电Phase 1·2026-08-14）
         self._memory_bus = None
+        # CausalMemoryStore — 唯一活实例（E2·2026-08-23）走工厂缓存
+        try:
+            from ..memory.causal_memory import get_causal_store
+            _base = Path.home() / ".openllm" / "memory"
+            self.causal = get_causal_store(_base / "causal")
+        except Exception:
+            self.causal = None
         print(f"  ISA[{self.session_id[:8]}] UI层就绪 · 模式={mode}")
 
     def _get_memory_bus(self):
@@ -113,8 +120,8 @@ class ISA:
                     causal_hints.append(m.get("lesson", ""))
         # [进化] 接入causal_memory结构化检索
         try:
-            from ..memory.causal_memory import CausalMemoryStore
-            store = CausalMemoryStore()
+            from ..memory.causal_memory import get_causal_store
+            store = get_causal_store()
             relevant = store.search(context_features=[msg.text[:50]], max_results=3)
             if relevant:
                 causal_hints.extend([r.lesson for r in relevant if r.lesson])
@@ -189,8 +196,8 @@ class ISA:
         except Exception:
             pass
         try:
-            from ..memory.causal_memory import CausalMemoryStore
-            store = CausalMemoryStore()
+            from ..memory.causal_memory import get_causal_store
+            store = get_causal_store()
             for r in store.search(max_results=10):
                 memories.append({"key": r.memory_id, "importance": 0.8, "layer": "causal", "content": (r.lesson or str(r))[:100]})
         except Exception:

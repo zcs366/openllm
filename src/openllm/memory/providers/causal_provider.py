@@ -55,10 +55,8 @@ class CausalProvider:
     def _ensure_store(self):
         """延迟初始化CausalMemoryStore"""
         if self._store is None:
-            from ..causal_memory import CausalMemoryStore
-            from pathlib import Path
-            store_dir = Path.home() / ".openllm" / "memory" / "causal"
-            self._store = CausalMemoryStore(store_dir=store_dir)
+            from ..causal_memory import get_causal_store
+            self._store = get_causal_store()
 
     def search(self, query: Query) -> List[MemoryRecord]:
         """从因果记忆中检索"""

@@ -673,6 +673,23 @@ class OpenLLMEngine:
         except Exception as e:
             logger.debug(f"因果记忆写入跳过: {e}")
 
+        # ── 会话因果链提取（每N轮调用一次LLM提取因果）──
+        # 每5轮chat调用一次SessionCausalExtractor
+        if not hasattr(self, '_chat_round_counter'):
+            self._chat_round_counter = 0
+        self._chat_round_counter += 1
+        if self._chat_round_counter % 5 == 0:
+            try:
+                from ..memory.session_causal_extractor import SessionCausalExtractor
+                extractor = SessionCausalExtractor()
+                # 获取当前会话ID（从memory获取）
+                session_id = getattr(self.memory, '_session_id', None) or f"chat_{self._chat_round_counter}"
+                result = extractor.extract_from_session(session_id)
+                if result.get('causal_chains', 0) > 0:
+                    logger.info(f"会话因果提取: {result['causal_chains']}条, 写入{result['written']}条")
+            except Exception as e:
+                logger.debug(f"会话因果提取跳过: {e}")
+
         return response
 
     def _detect_tool_call(self, text: str) -> Optional[tuple]:

@@ -13,6 +13,7 @@ from typing import Optional
 from .models import (Message, Context, Prediction, RiskAssessment,
                      Proposal, Critique, Decision, ActionResult)
 from .protocol import HeartbeatContext
+from .awakening import AwakeningProtocol
 
 
 def execute_tick(agent, msg: Message):
@@ -34,6 +35,17 @@ def execute_tick(agent, msg: Message):
         user_message=msg.text,
         tick_id=f"tick_{agent._tick_count}",
     )
+
+    # 苏醒协议：初始化（首次调用时创建）
+    if not hasattr(agent, "_awakening_protocol"):
+        agent._awakening_protocol = AwakeningProtocol(agent)
+
+    # E2 时钟：每拍写一行（空拍也写——记录流逝才叫钟）
+    try:
+        if agent.clock:
+            agent.clock.tick("beat")
+    except Exception:
+        pass
 
     try:
         # ═══ Phase 1: PERCEIVE（感知）═══
@@ -73,6 +85,45 @@ def _perceive(agent, msg, hc, turn):
     hc.identity = getattr(ctx, 'identity', {}) or {}
     turn.trace_phase("context", "ok", duration_ms=(time.time()-t1)*1000)
     agent.iko.trace("context", "ok")
+
+    # ── 苏醒协议：新session首轮注入苏醒词 ──
+    try:
+        if agent._awakening_protocol.inject_to_context(ctx, agent.session):
+            turn.trace_phase("awakening_inject", "ok")
+            agent.iko.trace("awakening_inject", "ok")
+    except Exception as _aw_err:
+        turn.trace_phase("awakening_inject", "skip", detail=str(_aw_err)[:100])
+
+    # 1.1b 因果疤注入（E2 缺口②·2026-08-23）
+    try:
+        if agent.isa.causal:
+            block = agent.isa.causal.to_context_block(max_entries=5)
+            if block and block.strip():
+                ctx.causal_block = block
+                hc.causal_block = block
+                # 同时并入 search_results（兼容旧路径）
+                ctx.search_results = getattr(ctx, 'search_results', []) or []
+                ctx.search_results.append(block)
+                turn.trace_phase("causal_inject", "ok", detail=f"{len(block)}chars")
+                agent.iko.trace("causal_inject", "ok")
+    except Exception as e:
+        turn.trace_phase("causal_inject", "skip", detail=str(e)[:100])
+
+    # 1.1c 苏醒读钟（E2 时钟·2026-08-23）
+    try:
+        if agent.clock:
+            _clk = agent.clock.now_status()
+            _clk_text = (
+                f"⏰ 时钟: 上次走针{_clk['last_wall_time']:.0f}, "
+                f"现在{time.time():.0f}, 间隔{_clk['gap_since_last']:.0f}秒, "
+                f"第{_clk['epoch']}拍, 苏醒{_clk['awakening_count']}次"
+            )
+            ctx.search_results = getattr(ctx, 'search_results', []) or []
+            ctx.search_results.append(_clk_text)
+            turn.trace_phase("clock_read", "ok", detail=f"epoch={_clk['epoch']}")
+            agent.iko.trace("clock_read", "ok")
+    except Exception:
+        pass
 
     # 1.2 章鱼索引搜索
     _do_search(agent, msg, ctx, hc, turn)
@@ -276,6 +327,21 @@ def _learn(agent, hc, turn):
     t7 = time.time()
     delta = agent.octopus.compare(prediction, result)
     agent.ios.learn_causal(ctx, prediction, result, delta)
+
+    # E2 缺口③：因果度量接线（2026-08-23）
+    try:
+        if agent.memory_evaluator:
+            _had_causal = bool(getattr(hc, 'causal_block', ''))
+            _influenced = _had_causal and (not delta.prediction_match)
+            agent.memory_evaluator.record_causal(
+                action=hc.user_message[:200],
+                retrieved=_had_causal,
+                influenced=_influenced,
+                lesson=delta.delta_summary,
+            )
+    except Exception:
+        pass  # 不阻塞主循环
+
     turn.trace_phase("learn", "ok", duration_ms=(time.time()-t7)*1000,
                      detail=delta.summary_text())
     agent.iko.trace("learn", "ok", detail=delta.summary_text())
@@ -294,6 +360,14 @@ def _learn(agent, hc, turn):
     else:
         agent._last_output = proposal.content if proposal.content else result.output
     hc.output = agent._last_output
+
+    # ── 苏醒协议：检测并记录选择 ──
+    try:
+        agent._awakening_protocol.detect_choice_and_record(
+            agent._last_output, agent.session
+        )
+    except Exception:
+        pass  # 选择检测失败不阻塞主循环
 
     # IKO pipeline
     try:
@@ -352,7 +426,16 @@ def _feedback(agent, hc, turn):
         turn.trace_phase("feedback", "ok", detail=f"collected:{len(records)}")
     except Exception as e:
         turn.trace_phase("feedback", "error", detail=str(e)[:50])
-    
+
+    # 5.2b 时钟仪表（E2·2026-08-23）
+    try:
+        if agent.clock:
+            _cs = agent.clock.now_status()
+            agent.iko.trace("clock", "ok",
+                detail=f"epoch={_cs['epoch']} awakenings={_cs['awakening_count']} gap={_cs['gap_since_last']:.0f}s")
+    except Exception:
+        pass
+
     # 5.3 过程透明化摘要
     _emit_summary(agent, hc, turn)
 

@@ -51,12 +51,12 @@ def get_checkpoint_manager():
     with _CHECKPOINT_MANAGER_LOCK:
         if _CHECKPOINT_MANAGER_INITIALIZED:
             return _CHECKPOINT_MANAGER
-        io_s_path = Path.home() / "projects" / "io-s"
+        io_s_path = Path.home() / "io-s"
         if not io_s_path.exists():
             _CHECKPOINT_MANAGER_INITIALIZED = True
             return None
         try:
-            _io_s_mod = lazy_import(io_s_path / "syscall" / "checkpoint", "io_s_checkpoint")
+            _io_s_mod = lazy_import(io_s_path / "syscall" / "checkpoint.py", "io_s_checkpoint")
             if _io_s_mod and hasattr(_io_s_mod, 'CheckpointManager'):
                 _CHECKPOINT_MANAGER = _io_s_mod.CheckpointManager()
             logger.info("✅ IO-S CheckpointManager 已加载")

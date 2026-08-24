@@ -38,7 +38,7 @@ class Soul:
     creator: str = "张成市"
     created: str = "2026-05-25"
     mission: str = "AI经验积累系统——让AI从每次交互中学习、校准自身行为、选择性遗忘。"
-    identity_hash: str = ""
+    identity_hash: str = ""  # 内容签名：对 name:version:creator 的 sha256 快照，不是身份本体
 
     # 多锚点
     anchors: dict = field(default_factory=lambda: {
@@ -57,6 +57,7 @@ class Soul:
     })
 
     def __post_init__(self):
+        # 此处生成的是内容签名——身份本体是 ~/io-s/boundary_evolution.py 记录的边界维持过程，不是这个哈希
         self.identity_hash = hashlib.sha256(
             f"{self.name}:{self.version}:{self.creator}".encode()
         ).hexdigest()[:12]

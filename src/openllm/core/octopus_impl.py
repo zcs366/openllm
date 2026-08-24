@@ -151,8 +151,13 @@ class _LeftBrain:
     def think(self, ctx: Context, prediction: Optional[Prediction] = None,
               risk: Optional[RiskAssessment] = None) -> Proposal:
         """基于上下文提出方案"""
+        # E2 缺口②：因果疤注入prompt（2026-08-23）
+        causal_ctx = ""
+        _cb = getattr(ctx, 'causal_block', None)
+        if _cb and _cb.strip():
+            causal_ctx = f"\n因果记忆参考：\n{_cb}\n"
         prompt = f"""基于以下用户消息，给出你的回答。直接回答，不要JSON格式。
-用户：{ctx.user_message}"""
+{causal_ctx}用户：{ctx.user_message}"""
         resp = self.provider.chat([{"role": "user", "content": prompt}])
         # 解析LLM返回的JSON
         try:
@@ -189,8 +194,13 @@ class _RightBrain:
     
     def review(self, ctx: Context, proposal: Proposal) -> Critique:
         """审查左脑提案"""
+        # E2 缺口②：因果疤注入prompt（2026-08-23）
+        causal_ctx = ""
+        _cb = getattr(ctx, 'causal_block', None)
+        if _cb and _cb.strip():
+            causal_ctx = f"\n因果记忆参考：\n{_cb}\n"
         prompt = f"""你是openLLM的右脑。审查左脑的提案。
-原始上下文：{ctx.user_message}
+{causal_ctx}原始上下文：{ctx.user_message}
 左脑提案：{proposal.content}
 左脑置信度：{proposal.confidence}
 左脑证据：{proposal.evidence}

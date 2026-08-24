@@ -121,6 +121,28 @@ def learn_causal(ios, ctx: Context, prediction: Prediction,
     except Exception:
         pass  # AutoCausalWriter不可用时静默降级
 
+    # E2 缺口④：直通CausalMemoryStore写入（2026-08-23）
+    # 补断：确保因果数据同时写入结构化store，不再只有jsonl
+    try:
+        from ..memory.causal_memory import CausalMemory, get_causal_store, TrustLevel, DEFAULT_STORE_DIR
+        _store = get_causal_store(DEFAULT_STORE_DIR)
+        _store.store(
+            action_signature=entry.get("action", "")[:100],
+            context_features=[entry.get("mechanism", "")],
+            prediction=entry.get("prediction", ""),
+            prediction_confidence=0.5,
+            actual_result=entry.get("actual", ""),
+            actual_success=result.success,
+            delta=delta.delta_summary,
+            delta_magnitude=0.0 if delta.prediction_match else min(1.0, len(delta.delta_summary) / 100.0),
+            lesson=entry.get("lesson", ""),
+            source="ios_learn_causal",
+            trust_level=TrustLevel.INTERNAL,
+            importance=0.5,
+        )
+    except Exception:
+        pass  # 不阻塞主循环
+
 
 def _classify_mechanism(result: ActionResult, delta: CausalDelta) -> str:
     """分类失败机制"""

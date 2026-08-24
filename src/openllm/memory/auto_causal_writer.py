@@ -36,9 +36,14 @@ class AutoCausalWriter:
     def __init__(self, store_dir: Optional[Path] = None):
         """
         Args:
-            store_dir: 因果记忆存储目录，默认 ~/.openllm/memory/causal
+            store_dir: 因果记忆存储目录，默认取共享常量
+                       causal_memory.DEFAULT_STORE_DIR（~/.openllm/memory/causal）。
+                       延迟导入该常量，使测试的 conftest 重定向在调用时生效。
         """
-        self.store_dir = store_dir or Path.home() / ".openllm" / "memory" / "causal"
+        if store_dir is None:
+            from .causal_memory import DEFAULT_STORE_DIR
+            store_dir = DEFAULT_STORE_DIR
+        self.store_dir = store_dir
         self.store_dir.mkdir(parents=True, exist_ok=True)
         self._log_path = self.store_dir / "write_log.jsonl"
 
