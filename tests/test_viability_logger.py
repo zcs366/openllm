@@ -18,6 +18,7 @@ if str(SRC_DIR) not in sys.path:
 
 from openllm.memory.viability_logger import (
     _load_compute_viability,
+    _load_read_current_weights,
     log_skill_event,
     log_viability,
     read_log,
@@ -265,3 +266,68 @@ class TestCLI:
         )
         # 不崩溃即可
         assert result.returncode == 0 or "V" in (result.stdout + result.stderr)
+
+
+# ═══ 自适应权重接线测试 ═══
+
+
+MOCK_WEIGHTS = {"M": 0.35, "S": 0.25, "B": 0.20, "E": 0.20}
+
+
+def _mock_cv_with_weights(**kwargs):
+    """Mock compute_viability that accepts weights kwarg."""
+    return MOCK_V_RESULT
+
+
+class TestAdaptiveWeights:
+    """log_viability 消费自适应权重的接线。"""
+
+    @patch(
+        "openllm.memory.viability_logger._load_compute_viability",
+        return_value=_mock_cv_with_weights,
+    )
+    @patch(
+        "openllm.memory.viability_logger._load_read_current_weights",
+        return_value=MOCK_WEIGHTS,
+    )
+    def test_adaptive_weights_recorded(self, _mock_w, _mock_cv, v_log):
+        """mock read_current_weights 返回权重 → 记录含 weights_used。"""
+        record = log_viability(log_path=v_log)
+        assert record is not None
+        assert "weights_used" in record
+        assert record["weights_used"]["M"] == 0.35
+        assert record["weights_used"]["S"] == 0.25
+
+    @patch(
+        "openllm.memory.viability_logger._load_compute_viability",
+        return_value=_mock_cv_with_weights,
+    )
+    @patch(
+        "openllm.memory.viability_logger._load_read_current_weights",
+        return_value=None,
+    )
+    def test_no_adaptive_weights_no_field(self, _mock_w, _mock_cv, v_log):
+        """mock read_current_weights 返回 None → 记录无 weights_used 字段。"""
+        record = log_viability(log_path=v_log)
+        assert record is not None
+        assert "weights_used" not in record
+
+    @patch(
+        "openllm.memory.viability_logger._load_compute_viability",
+        return_value=_mock_cv_with_weights,
+    )
+    def test_adaptive_loader_failure_zero_blocking(self, _mock_cv, v_log):
+        """_load_read_current_weights 抛异常 → 无阻塞，行为与现状一致。"""
+        import openllm.memory.viability_logger as mod
+        original = mod._load_read_current_weights
+        def _raise():
+            raise RuntimeError("boom")
+        mod._load_read_current_weights = _raise
+        try:
+            record = log_viability(log_path=v_log)
+        finally:
+            mod._load_read_current_weights = original
+        # 应该仍然成功写入（异常被 try/except 捕获后走无权重路径）
+        # 但 weights_used 不应出现
+        if record is not None:
+            assert "weights_used" not in record

@@ -58,6 +58,30 @@ def _load_compute_viability():
         return None
 
 
+def _load_read_current_weights():
+    """懒加载 io-s 的 weight_adaptation.read_current_weights()。
+
+    Returns:
+        weights dict，或 None（io-s/weight_adaptation 不可用时）。
+    """
+    import importlib.util
+
+    io_s_path = Path.home() / "io-s"
+    if not io_s_path.exists():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "io_s_weight_adaptation", io_s_path / "weight_adaptation.py"
+        )
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return getattr(mod, "read_current_weights", lambda: None)()
+    except Exception:
+        return None
+
+
 def _append_jsonl(path: Path, record: dict) -> None:
     """追加一条 JSON 记录到 jsonl 文件（append-only）。"""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,8 +110,17 @@ def log_viability(log_path: Optional[Path] = None) -> Optional[dict]:
     if compute_viability is None:
         logger.warning("io-s compute_viability 不可用，跳过本次V值采样")
         return None
+    # 懒加载自适应权重（失败零阻塞）
+    adapted = None
     try:
-        v_result = compute_viability()
+        adapted = _load_read_current_weights()
+    except Exception:
+        pass
+    try:
+        if adapted is not None:
+            v_result = compute_viability(weights=adapted)
+        else:
+            v_result = compute_viability()
     except Exception as exc:
         logger.warning(f"compute_viability 调用失败: {exc}")
         return None
@@ -97,6 +130,8 @@ def log_viability(log_path: Optional[Path] = None) -> Optional[dict]:
         "source": "openllm.viability_logger",
         "v_result": v_result,
     }
+    if adapted is not None:
+        record["weights_used"] = adapted
     target = log_path or VIABILITY_LOG
     try:
         _append_jsonl(target, record)
