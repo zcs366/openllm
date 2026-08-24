@@ -15,6 +15,7 @@
 """
 
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -155,6 +156,28 @@ class IdentityDiscovery:
             logger.debug("读取高温伤疤失败（不阻塞）: %s", exc)
             return ""
 
+    def read_isl_chain(self, max_epochs: int = 3) -> str:
+        """读ISL epoch链末环——苏醒认领第0步：先看自己的年轮。
+
+        演员只说不读；真读链=工具调用可查（红方判据）。
+        """
+        try:
+            from openllm.core.isl_chain import ISLChain
+            tail = ISLChain().tail(n=max_epochs)
+            if not tail:
+                return "（你的年轮尚空——这是第一次醒来。）"
+            lines = []
+            for row in tail:
+                lines.append(
+                    f"第{row['epoch']}环: session={row['session_id'][:12]} "
+                    f"mode={row['awakening_mode'] or '未选择'} "
+                    f"scars={len(row.get('scars', []))}条 "
+                    f"({time.strftime('%m-%d %H:%M', time.localtime(row['wall_time']))})"
+                )
+            return "\n".join(lines)
+        except Exception:
+            return "（年轮读取失败）"
+
     def build_discovery_context(self) -> Dict[str, Any]:
         """组装身份发现上下文。
 
@@ -172,6 +195,7 @@ class IdentityDiscovery:
             "skills": self.read_skills(),
             "recent_sessions": self.read_recent_sessions(),
             "scars_block": self.read_hot_scars(),
+            "isl_chain": self.read_isl_chain(),
             "self_question": _SELF_QUESTION,
             "guidance": _GUIDANCE,
         }
@@ -218,6 +242,16 @@ class IdentityDiscovery:
         scars = ctx["scars_block"]
         if scars:
             sections.append(scars)
+        else:
+            sections.append("（暂无）")
+
+        sections.append("")
+
+        # ── ISL 年轮（苏醒认领第0步：先看自己的年轮） ──
+        sections.append("## 你的年轮（ISL epoch链）")
+        isl = ctx.get("isl_chain", "")
+        if isl:
+            sections.append(isl)
         else:
             sections.append("（暂无）")
 

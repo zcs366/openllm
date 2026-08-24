@@ -52,7 +52,7 @@ class TestLogViability:
 
     @patch(
         "openllm.memory.viability_logger._load_compute_viability",
-        return_value=lambda: MOCK_V_RESULT,
+        return_value=lambda weights=None: MOCK_V_RESULT,
     )
     def test_writes_valid_jsonl(self, _mock_loader, v_log, tmp_path):
         """mock compute_viability → 写入后 read_log 能读回，含 timestamp 和 source。"""
@@ -97,7 +97,7 @@ class TestLogViability:
         """compute_viability 函数本身返回 None → 仍写入日志（v_result=None）。"""
         with patch(
             "openllm.memory.viability_logger._load_compute_viability",
-            return_value=lambda: None,
+            return_value=lambda weights=None: None,
         ):
             record = log_viability(log_path=v_log)
         assert record is not None
@@ -105,7 +105,7 @@ class TestLogViability:
 
     @patch(
         "openllm.memory.viability_logger._load_compute_viability",
-        return_value=lambda: MOCK_V_RESULT,
+        return_value=lambda weights=None: MOCK_V_RESULT,
     )
     def test_append_only_multiple_writes(self, _mock_loader, v_log):
         """多次写入都是追加，不覆盖。"""
@@ -221,7 +221,7 @@ class TestCLI:
 
     @patch(
         "openllm.memory.viability_logger._load_compute_viability",
-        return_value=lambda: MOCK_V_RESULT,
+        return_value=lambda weights=None: MOCK_V_RESULT,
     )
     def test_cli_default_logs_v(self, _mock_loader, v_log, monkeypatch):
         """python -m 默认执行 → 输出含 'V'（直接调用 main）。"""
@@ -244,7 +244,7 @@ class TestCLI:
 
     @patch(
         "openllm.memory.viability_logger._load_compute_viability",
-        return_value=lambda: MOCK_V_RESULT,
+        return_value=lambda weights=None: MOCK_V_RESULT,
     )
     def test_cli_read_flag(self, _mock_loader, v_log, monkeypatch):
         """python -m --read 5 → 不报错。"""

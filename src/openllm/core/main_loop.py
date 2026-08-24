@@ -158,6 +158,13 @@ class Agent:
             self._suppress.__exit__(None, None, None)
             self._suppress = None
         self.iko.shutdown()
+        # ISL：session收尾沉淀一环（空环也写，不可撤销）
+        try:
+            from openllm.core.isl_chain import ISLChain
+            ISLChain().append_epoch(session_id=self.session.id)
+        except Exception:
+            import logging
+            logging.getLogger("openllm.isl").exception("ISL epoch写入失败（不阻断关闭）")
         self.session.end()
     
 

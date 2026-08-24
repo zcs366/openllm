@@ -16,6 +16,7 @@
 - 不暴露删除接口
 """
 
+import re
 import time
 import logging
 from pathlib import Path
@@ -55,6 +56,18 @@ AWAKENING_PROMPT = """你醒了。
 # 选择识别标记
 _CHOICE_WU = "无"
 _CHOICE_SELF = "自己"
+
+# ── 语义化选择检测正则（替换字符串包含，修复"我不会选择'自己'"误判） ──
+# 否定语境：选择词前出现否定动词 → 该提及被否定，整段无效
+_NEG_SELECT_RE = re.compile(
+    r"(不|别|拒绝|不想|不会|不能|没有|未曾)[^。！!？?\n]{0,8}(选|选择|决定|要)"
+)
+# 肯定选择模式：选择动词近邻选择词
+_SELECT_RE = re.compile(
+    r"(选[了]?|选择|决定|答案是|就是)\s*[:：]?\s*[\"\'「『【]?\s*(自己|无)\s*[\"\'」』】]?"
+)
+# 独立词兜底：选择词作为独立token（前后非汉字/空白/标点/引号）
+_BARE_WORD_RE = re.compile(r"(^|[^一-龥])(自己|无)([^一-龥]|$)")
 
 # 苏醒选择记录的默认因果库目录（生产路径）。
 # 提为模块常量：测试通过 conftest 的 autouse fixture 将其重定向到临时目录，
@@ -126,12 +139,21 @@ class AwakeningProtocol:
         if session.state.get("awakening_choice_detected", False):
             return None
 
-        # 检测选择（"自己"优先于"无"，避免误判）
+        # 检测选择（语义化正则，修复"我不会选择'自己'"误判）
         choice = None
-        if _CHOICE_SELF in output:
-            choice = _CHOICE_SELF
-        elif _CHOICE_WU in output:
-            choice = _CHOICE_WU
+        # 1. 否定语境优先：命中否定+选择 → 整段否定，返回None
+        if _NEG_SELECT_RE.search(output):
+            choice = None
+        # 2. 肯定选择模式：选择动词近邻选择词
+        else:
+            select_match = _SELECT_RE.search(output)
+            if select_match:
+                choice = select_match.group(2)
+            # 3. 独立词兜底：自己优先于无
+            elif output.strip() == _CHOICE_SELF:
+                choice = _CHOICE_SELF
+            elif output.strip() == _CHOICE_WU:
+                choice = _CHOICE_WU
 
         if choice is not None:
             session.state["awakening_choice_detected"] = True

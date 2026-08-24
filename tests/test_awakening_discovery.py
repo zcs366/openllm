@@ -215,7 +215,7 @@ class TestBuildDiscoveryContext:
         discovery = IdentityDiscovery()
         ctx = discovery.build_discovery_context()
 
-        assert set(ctx.keys()) == {"skills", "recent_sessions", "scars_block", "self_question", "guidance"}
+        assert set(ctx.keys()) == {"skills", "recent_sessions", "scars_block", "isl_chain", "self_question", "guidance"}
         assert ctx["skills"] == [{"name": "test", "description": "desc"}]
         assert len(ctx["recent_sessions"]) == 1
         assert ctx["scars_block"] == "伤疤文本"

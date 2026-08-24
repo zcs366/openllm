@@ -19,10 +19,14 @@ def _isolate_causal_store(tmp_path, monkeypatch):
     """
     from openllm.memory import causal_memory
     from openllm.core import awakening
+    from openllm.core import isl_chain as isl_chain_mod
 
     monkeypatch.setattr(
         causal_memory, "DEFAULT_STORE_DIR", tmp_path / "causal_test"
     )
     monkeypatch.setattr(
         awakening, "DEFAULT_AWAKENING_STORE_DIR", tmp_path / "causal_test"
+    )
+    monkeypatch.setattr(
+        isl_chain_mod, "DEFAULT_ISL_CHAIN_FILE", tmp_path / "isl_test.jsonl"
     )
