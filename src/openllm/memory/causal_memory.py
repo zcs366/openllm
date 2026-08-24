@@ -423,6 +423,20 @@ class CausalMemoryStore:
             "patterns": len(self._patterns),
         }
     
+    def get_by_session(self, session_id: str) -> List["CausalMemory"]:
+        """按session_id取本session写入的因果伤疤（ISL环的scars索引源）。
+
+        遍历 _memories 过滤 session_id 匹配，返回按时间正序。
+        """
+        if not session_id:
+            return []
+        if not self._memories:
+            self._load_all()
+        hits = [m for m in self._memories.values()
+                if m.session_id == session_id]
+        hits.sort(key=lambda m: m.created_at if m.created_at else 0.0)
+        return hits
+
     def to_context_block(self, max_entries: int = 5) -> str:
         """
         生成context注入块——VISTA dashboard思路。

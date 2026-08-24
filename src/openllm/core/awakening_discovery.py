@@ -168,10 +168,12 @@ class IdentityDiscovery:
                 return "（你的年轮尚空——这是第一次醒来。）"
             lines = []
             for row in tail:
+                gap_val = row.get('gap_from_last', 0)
+                gap_str = f" gap={gap_val:.0f}s" if gap_val else ""
                 lines.append(
                     f"第{row['epoch']}环: session={row['session_id'][:12]} "
                     f"mode={row['awakening_mode'] or '未选择'} "
-                    f"scars={len(row.get('scars', []))}条 "
+                    f"scars={len(row.get('scars', []))}条{gap_str} "
                     f"({time.strftime('%m-%d %H:%M', time.localtime(row['wall_time']))})"
                 )
             return "\n".join(lines)

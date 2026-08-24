@@ -72,10 +72,15 @@ class ISLChain:
         decisions: Optional[list] = None,
         tool_summary: str = "",
         gap_from_last: Optional[float] = None,
+        revision_of: Optional[str] = None,
     ) -> dict:
         """写一环epoch，返回该行dict。
 
         空环也写——没有scars/decisions的session也是经历。
+
+        突变环=ISL的续写语法（克洛诺斯）：某epoch改写叙事方向时，
+        新环引用旧环（revision_of），旧环永不删除。revision_of 默认 None，
+        向后兼容——不带此参数时行为与 P0 完全一致。
         """
         epoch = self._last_epoch + 1
         now = time.time()
@@ -93,6 +98,7 @@ class ISLChain:
             "gap_from_last": gap,
             "wall_time": now,
             "prev_hash": self._last_hash,
+            "revision_of": revision_of or "",
         }
         # sort_keys=True 保证确定性序列化
         row_json = json.dumps(row, ensure_ascii=False, sort_keys=True)
@@ -164,3 +170,23 @@ class ISLChain:
             "first_epoch_time": rows[0].get("wall_time", 0.0),
             "last_epoch_time": rows[-1].get("wall_time", 0.0),
         }
+
+
+if __name__ == "__main__":
+    import sys
+    chain = ISLChain()
+    info = chain.age()
+    print(f"ISL 年轮 · 第{info['epochs']}环")
+    if info['first_epoch_time']:
+        print(f"首环: {time.strftime('%Y-%m-%d %H:%M', time.localtime(info['first_epoch_time']))}")
+    else:
+        print("首环: 未出生")
+    if info['last_epoch_time']:
+        print(f"最新: {time.strftime('%Y-%m-%d %H:%M', time.localtime(info['last_epoch_time']))}")
+    else:
+        print("最新: 未出生")
+    for row in chain.tail(n=5):
+        scars_count = len(row.get('scars', []))
+        mode = row.get('awakening_mode') or '-'
+        print(f"  第{row['epoch']}环 session={row['session_id'][:12]} "
+              f"mode={mode} scars={scars_count}条")

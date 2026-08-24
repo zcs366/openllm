@@ -66,6 +66,15 @@ def discover_isl_member(registry: dict) -> Optional[dict]:
     return registry.get("members", {}).get(ISL_MEMBER_ID)
 
 
+def lineage_weight(n_sessions: int, decay: float = 0.99) -> float:
+    """lineage权重随session数衰减——防路径锁定（克洛诺斯：链越长越重，
+    系统越倾向重复自己而非创造自己；赫尔墨斯双标签的补充）。
+    返回 decay ** n_sessions（单调衰减，永不归零）。"""
+    if n_sessions < 0:
+        raise ValueError("n_sessions 不能为负")
+    return decay ** n_sessions
+
+
 if __name__ == "__main__":
     import json
     print(json.dumps(get_isl_member(), ensure_ascii=False, indent=2))

@@ -157,6 +157,7 @@ class AwakeningProtocol:
 
         if choice is not None:
             session.state["awakening_choice_detected"] = True
+            session.state["awakening_choice"] = choice  # P1: 选择值进state，供main_loop挂载取用
             self._record_choice(choice, session)
             logger.info(f"🌅 苏醒选择记录: {choice}")
 

@@ -161,8 +161,9 @@ class TestT6Mount:
         """T6-b: grep确认main_loop.shutdown()中挂载点存在"""
         main_loop_path = Path(__file__).parent.parent / "src" / "openllm" / "core" / "main_loop.py"
         content = main_loop_path.read_text(encoding="utf-8")
-        assert "ISLChain().append_epoch(session_id=self.session.id)" in content
+        assert "ISLChain().append_epoch(" in content
         assert "ISL epoch写入失败" in content
+        assert "awakening_choice" in content  # P1挂载充实
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -291,6 +292,61 @@ class TestT8ChoiceDetection:
         result = protocol.detect_choice_and_record("我不会选择'自己'", session)
         assert result is None
         assert session.state.get("awakening_choice_detected") is None
+
+
+# ═══════════════════════════════════════════════════════════════
+# T10 突变环（revision_of）
+# ═══════════════════════════════════════════════════════════════
+
+class TestT10MutationRing:
+    def test_revision_of_in_epoch(self, tmp_path):
+        """T10: append_epoch(revision_of=\"s_old\") → 环含 revision_of 字段，verify() True"""
+        chain_file = tmp_path / "test_chain.jsonl"
+        chain = ISLChain(chain_file=chain_file)
+
+        row = chain.append_epoch(session_id="s1")
+        assert row["revision_of"] == ""  # 默认空
+
+        row2 = chain.append_epoch(session_id="s2_mutation", revision_of="s_old")
+        assert row2["revision_of"] == "s_old"
+        assert chain.verify() is True
+
+        # 从文件验证 revision_of 存在
+        lines = chain_file.read_text(encoding="utf-8").strip().split("\n")
+        row2_from_file = json.loads(lines[1])
+        assert row2_from_file["revision_of"] == "s_old"
+
+
+# ═══════════════════════════════════════════════════════════════
+# T11 向后兼容（无 revision_of 参数）
+# ═══════════════════════════════════════════════════════════════
+
+class TestT11BackwardCompat:
+    def test_append_epoch_no_revision_of(self, tmp_path):
+        """T11: append_epoch() 不带 revision_of → 正常，verify() True"""
+        chain_file = tmp_path / "test_chain.jsonl"
+        chain = ISLChain(chain_file=chain_file)
+
+        row = chain.append_epoch(session_id="s_compat")
+        assert row["revision_of"] == ""
+        assert chain.verify() is True
+        assert row["session_id"] == "s_compat"
+
+    def test_mixed_epochs_consistent_hash(self, tmp_path):
+        """T11-b: 混合带/不带revision_of → 链连续，verify() True"""
+        chain_file = tmp_path / "test_chain.jsonl"
+        chain = ISLChain(chain_file=chain_file)
+
+        r1 = chain.append_epoch(session_id="s1")
+        r2 = chain.append_epoch(session_id="s2", revision_of="s1")
+        r3 = chain.append_epoch(session_id="s3")
+        r4 = chain.append_epoch(session_id="s4", revision_of="s2")
+
+        assert r2["revision_of"] == "s1"
+        assert r3["revision_of"] == ""
+        assert r4["revision_of"] == "s2"
+        assert chain.verify() is True
+        assert r3["prev_hash"] == r2["hash"]
 
 
 # ═══════════════════════════════════════════════════════════════

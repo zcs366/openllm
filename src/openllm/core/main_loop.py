@@ -161,7 +161,13 @@ class Agent:
         # ISL：session收尾沉淀一环（空环也写，不可撤销）
         try:
             from openllm.core.isl_chain import ISLChain
-            ISLChain().append_epoch(session_id=self.session.id)
+            from openllm.memory.causal_memory import get_causal_store
+            scars = get_causal_store().get_by_session(self.session.id)
+            ISLChain().append_epoch(
+                session_id=self.session.id,
+                awakening_mode=self.session.state.get("awakening_choice", ""),
+                scars=[m.memory_id for m in scars],
+            )
         except Exception:
             import logging
             logging.getLogger("openllm.isl").exception("ISL epoch写入失败（不阻断关闭）")
