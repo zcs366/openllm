@@ -279,16 +279,18 @@ def main():
     if "--agent-mode" in args:
         # Agent模式：静默启动，支持结构化API
         agent = Agent(mode="silent")
+        result = None
         try:
             if "--once" in args:
                 idx = args.index("--once")
                 message = args[idx + 1] if idx + 1 < len(args) else "你好"
                 result = agent.run_once(message)
-                print(result)
             else:
                 agent.run()
         finally:
             agent.shutdown()
+        if result is not None:
+            print(result)
         return
     
     if "--once" in args:
@@ -296,7 +298,10 @@ def main():
         idx = args.index("--once")
         message = args[idx + 1] if idx + 1 < len(args) else "你好"
         agent = Agent(mode="silent")
-        result = agent.run_once(message)
+        try:
+            result = agent.run_once(message)
+        finally:
+            agent.shutdown()
         print(result)
         return
     

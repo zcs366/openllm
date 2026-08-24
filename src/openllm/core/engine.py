@@ -236,20 +236,36 @@ class OpenLLMEngine:
         self.bus.subscribe(MessageType.MEMORY_QUERY, _vessel_1_memory)
 
     def _init_provider(self) -> bool:
-        """初始化模型Provider。支持：deepseek/openai/anthropic/gemini/ollama。"""
+        """初始化模型Provider。支持：deepseek/openai/anthropic/gemini/ollama/mimo/qwen。"""
         try:
             p = self.config.provider
             endpoint = ""
             if p == "ollama":
                 api_key = "ollama"
+                import json
+                cfg_path = Path.home() / ".openllm" / "config.json"
+                if cfg_path.exists():
+                    cfg = json.loads(cfg_path.read_text())
+                    ol = cfg.get("providers", {}).get("ollama", {})
+                    endpoint = ol.get("endpoint", "")
+                    cfg_model = ol.get("model", "")
+                    if cfg_model:
+                        self.config.model = cfg_model
+                if not endpoint:
+                    endpoint = "http://localhost:11434/v1/chat/completions"
             elif p == "mimo":
                 api_key = os.environ.get("MIMO_API_KEY", "")
-                if not api_key:
-                    import json
-                    cfg_path = Path.home() / ".openllm" / "config.json"
-                    if cfg_path.exists():
-                        cfg = json.loads(cfg_path.read_text())
-                        api_key = cfg.get("providers", {}).get("mimo", {}).get("api_key", "")
+                import json
+                cfg_path = Path.home() / ".openllm" / "config.json"
+                if cfg_path.exists():
+                    cfg = json.loads(cfg_path.read_text())
+                    mm = cfg.get("providers", {}).get("mimo", {})
+                    if not api_key:
+                        api_key = mm.get("api_key", "")
+                    endpoint = mm.get("endpoint", "")
+                    cfg_model = mm.get("model", "")
+                    if cfg_model:
+                        self.config.model = cfg_model
             elif p == "qwen":
                 api_key = os.environ.get("ALIBABA_PLAN_API_KEY", "")
                 endpoint = ""
@@ -298,6 +314,11 @@ class OpenLLMEngine:
         from .engine_utils import get_api_key
         return get_api_key(self.config.provider)
 
+    def _get_endpoint(self) -> str:
+        """获取endpoint URL（委托engine_utils）。"""
+        from .engine_utils import get_endpoint
+        return get_endpoint(self.config.provider)
+
     def oneshot(self, prompt: str, system: str = "你是一个有帮助的助手。",
                 temperature: float = 0.3, max_tokens: int = 1024) -> str:
         """轻量级LLM调用，跳过agent循环/记忆/工具/身份。
@@ -307,6 +328,7 @@ class OpenLLMEngine:
             prompt, system=system, model=self.config.model,
             provider=self.config.provider, temperature=temperature,
             max_tokens=max_tokens, api_key=self._get_api_key(),
+            endpoint=self._get_endpoint(),
         )
 
     def classify(self, text: str, categories: list[str]) -> str:

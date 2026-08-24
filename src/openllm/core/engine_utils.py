@@ -33,7 +33,27 @@ def get_api_key(provider: str) -> str:
         return os.environ.get("ANTHROPIC_API_KEY", "")
     elif provider == "gemini":
         return os.environ.get("GEMINI_API_KEY", "")
+    elif provider in ("mimo", "qwen"):
+        import json
+        from pathlib import Path as _P
+        cfg_path = _P.home() / ".openllm" / "config.json"
+        if cfg_path.exists():
+            cfg = json.loads(cfg_path.read_text())
+            return cfg.get("providers", {}).get(provider, {}).get("api_key", "")
+        return ""
     return os.environ.get("DEEPSEEK_API_KEY", "")
+
+
+def get_endpoint(provider: str) -> str:
+    """获取当前provider的endpoint URL（从config.json）。"""
+    if provider in ("ollama", "mimo", "qwen"):
+        import json
+        from pathlib import Path as _P
+        cfg_path = _P.home() / ".openllm" / "config.json"
+        if cfg_path.exists():
+            cfg = json.loads(cfg_path.read_text())
+            return cfg.get("providers", {}).get(provider, {}).get("endpoint", "")
+    return ""
 
 
 def build_system_prompt(tools_list: list, identity: str, mem_ctx: dict) -> str:
