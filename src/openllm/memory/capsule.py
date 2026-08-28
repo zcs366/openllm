@@ -13,12 +13,18 @@ OpenLLM Memory OS — Δ胶囊 + 仲裁层 + 检查点系统。
 """
 
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 import numpy as np
+
+_logger = logging.getLogger("openllm.capsule")
+
+# Module-level lazy singleton for EmbeddingEngine (DR-20260829-01 P0-A fix)
+_EMBEDDING_ENGINE = None
 
 
 # ── 配置 ────────────────────────────────────────────
@@ -92,6 +98,9 @@ class DeltaCapsule:
     def __post_init__(self):
         self.vector = np.asarray(self.vector, dtype=np.float32)
         if self.vector.shape != (CAPSULE_DIM,):
+            _logger.warning(
+                "ΔCapsule向量形状不符：got %s，已置零", self.vector.shape
+            )
             self.vector = np.zeros(CAPSULE_DIM, dtype=np.float32)
         self.norm = float(np.linalg.norm(self.vector))
 
@@ -103,16 +112,60 @@ class DeltaCapsule:
 
     @classmethod
     def from_text(cls, session_id: str, text: str) -> "DeltaCapsule":
-        """从文本生成Δ向量——真实的语义编码。"""
+        """从文本生成Δ向量——真实的语义编码。
+        
+        三级降级：openllm_memory包 → EmbeddingEngine → hash fallback(384维)。
+        """
+        vec = None
+        model_name = None
+
+        # Level 1: 向后兼容——openllm_memory.encode_text（万一以后包修好了）
         try:
             from openllm_memory import encode_text
-            vec = encode_text(text)
+            result = encode_text(text)
+            vec = np.asarray(result, dtype=np.float32).flatten()
+            model_name = "all-MiniLM-L6-v2"
         except (ImportError, AttributeError):
-            # fallback: 随机向量（用于测试和无embedding环境）
-            import hashlib, struct
+            pass
+
+        # Level 2: EmbeddingEngine（真正的sentence-transformers编码）
+        if vec is None or len(vec) != CAPSULE_DIM:
+            try:
+                global _EMBEDDING_ENGINE
+                if _EMBEDDING_ENGINE is None:
+                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+                    from openllm.embedding import EmbeddingEngine
+                    _EMBEDDING_ENGINE = EmbeddingEngine()
+                result = _EMBEDDING_ENGINE.encode(text)
+                vec = np.asarray(result, dtype=np.float32).flatten()
+                model_name = "all-MiniLM-L6-v2"
+            except (ImportError, AttributeError, Exception) as e:
+                _logger.debug("EmbeddingEngine不可用，降级hash fallback: %s", e)
+
+        # Level 3: hash fallback（384维循环填充，永远可用）
+        if vec is None or len(vec) != CAPSULE_DIM:
+            import hashlib
             h = hashlib.sha256(text.encode()).digest()
-            vec = np.frombuffer(h, dtype=np.float32)[:8]  # 8维伪向量
-        return cls(session_id=session_id, vector=vec, metadata={"source": "embedding", "model": "all-MiniLM-L6-v2"})
+            # DR-20260829-01R: int32重解释+缩放到[-1,1]，防止float32直接解释产生inf值
+            base = np.frombuffer(h, dtype=np.int32).astype(np.float32) / np.float32(2**31)
+            reps = (CAPSULE_DIM // len(base)) + 1
+            vec = np.tile(base, reps)[:CAPSULE_DIM]
+            model_name = "hash_fallback"
+
+        # pad/truncate到CAPSULE_DIM
+        padded = False
+        if len(vec) != CAPSULE_DIM:
+            padded = True
+            if len(vec) < CAPSULE_DIM:
+                vec = np.pad(vec, (0, CAPSULE_DIM - len(vec)), mode='constant')
+            else:
+                vec = vec[:CAPSULE_DIM]
+
+        metadata = {"source": "embedding", "model": model_name}
+        if padded:
+            metadata["padded"] = True
+
+        return cls(session_id=session_id, vector=vec, metadata=metadata)
 
     def to_dict(self) -> dict:
         return {

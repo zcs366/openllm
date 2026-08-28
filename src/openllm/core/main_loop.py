@@ -75,6 +75,7 @@ class Agent:
         self._tick_count = 0
         self._max_ticks = 100  # 安全上限
         self._last_output = ""
+        self._persisted = False  # DR-20260829-01 P0-B: 防重复落盘
         
         # ── IAX Layer 7 推理预算管理器 ──
         self._budget_manager = InferenceBudgetManager() if _HAS_BUDGET else None
@@ -158,6 +159,12 @@ class Agent:
             self._suppress.__exit__(None, None, None)
             self._suppress = None
         self.iko.shutdown()
+
+        # DR-20260829-01 P0-B: 会话记忆持久化（ISL epoch写入之前）
+        if not self._persisted:
+            self._persist_session()
+            self._persisted = True
+
         # ISL：session收尾沉淀一环（空环也写，不可撤销）
         try:
             from openllm.core.isl_chain import ISLChain
@@ -172,6 +179,72 @@ class Agent:
             import logging
             logging.getLogger("openllm.isl").exception("ISL epoch写入失败（不阻断关闭）")
         self.session.end()
+
+    def _persist_session(self):
+        """DR-20260829-01 P0-B: 会话收尾落盘（TextCapsule + Δ胶囊 + history）"""
+        import logging
+        _log = logging.getLogger("openllm.persistence")
+        try:
+            # 零turn会话跳过
+            if not self.session.turns and not self._last_output:
+                return
+            from ..memory.capsule import TextCapsule, DeltaCapsule, MemoryOS
+            # 提取会话摘要
+            decisions = []
+            for t in self.session.turns:
+                # 从phase_metrics中提取最有意义的detail作为决策摘要
+                for pm in getattr(t, 'phase_metrics', []):
+                    d = pm.get("detail", "")
+                    if d:
+                        decisions.append({"summary": d[:80]})
+                        break
+            # 如果没有从turns提取到，用_last_message
+            if not decisions:
+                _lm = getattr(self, '_last_message', None)
+                if _lm and hasattr(_lm, 'text'):
+                    decisions.append({"summary": _lm.text[:80]})
+            insights = []
+            if self._last_output:
+                insights.append(self._last_output[:200])
+            outputs = [self._last_output[:200]] if self._last_output else []
+            session_id = f"s{int(time.time())}"
+            text = TextCapsule(
+                session_id=session_id,
+                decisions=decisions,
+                insights=insights,
+                outputs=outputs,
+            )
+            delta_vec = DeltaCapsule.from_text(session_id, text.to_text())
+            caps_dir = Path.home() / "projects" / "openllm" / "caps"
+            mos = MemoryOS(caps_dir)
+            mos.write(text, delta_vec)
+            # DR-20260829-01R: history写盘（参照engine.py:1049-1052）
+            history_path = caps_dir / f"history_{session_id}.json"
+            history_records = []
+            # 从session turns提取user/assistant消息
+            for t in self.session.turns:
+                _um = getattr(t, 'user_message', None)
+                if _um:
+                    history_records.append({"role": "user", "content": str(_um)[:2000]})
+                _am = getattr(t, 'assistant_output', None)
+                if _am:
+                    history_records.append({"role": "assistant", "content": str(_am)[:2000]})
+                elif hasattr(t, 'summary') and callable(t.summary):
+                    _sum = t.summary()
+                    if _sum:
+                        history_records.append({"role": "assistant", "content": str(_sum)[:2000]})
+            # 用户消息置前（_last_message由_execute_tick记录）
+            _lm = getattr(self, '_last_message', None)
+            if _lm and hasattr(_lm, 'text') and _lm.text:
+                history_records.insert(0, {"role": "user", "content": _lm.text[:2000]})
+            # _last_output作为assistant回复
+            if self._last_output:
+                history_records.append({"role": "assistant", "content": self._last_output[:2000]})
+            with open(history_path, "w", encoding="utf-8") as hf:
+                json.dump(history_records, hf, ensure_ascii=False, indent=2)
+            _log.info("会话记忆已落盘: %s (decisions=%d, history=%d)", session_id, len(decisions), len(history_records))
+        except Exception:
+            _log.warning("会话记忆落盘失败（不阻断关闭）", exc_info=True)
     
 
     def _load_max_context(self) -> int:
@@ -277,6 +350,7 @@ class Agent:
 
     def _execute_tick(self, msg: Message):
         """一次完整的10阶段心跳（委托给agent_heartbeat）"""
+        self._last_message = msg  # DR-20260829-01R: 记录末次输入供shutdown持久化
         from .agent_heartbeat import execute_tick
         execute_tick(self, msg)
 

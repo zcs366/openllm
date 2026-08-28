@@ -1,6 +1,6 @@
 from .degradation_trace import trace_degradation
 """extracted from main_loop.py"""
-import json, os, time, uuid
+import json, os, re, time, uuid
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Optional
@@ -101,7 +101,13 @@ class 章鱼I:
 
 class _LeftBrain:
     """左脑(正手)：提案"""
-    
+
+    # DR-20260829-01R: 身份询问正则——检测到时加倍身份注入
+    _IDENTITY_RE = re.compile(
+        r'你是谁|你是什么|你是.*模型|你叫什么|介绍你自己|你的身份|你的名字|who are you|what are you|your name|your identity',
+        re.IGNORECASE
+    )
+
     def __init__(self):
         self.provider = LLMProvider()
     
@@ -150,21 +156,82 @@ class _LeftBrain:
     
     def think(self, ctx: Context, prediction: Optional[Prediction] = None,
               risk: Optional[RiskAssessment] = None) -> Proposal:
-        """基于上下文提出方案"""
+        """基于上下文提出方案（DR-20260828-01：先想后析双阶段+工具注入）"""
         # E2 缺口②：因果疤注入prompt（2026-08-23）
         causal_ctx = ""
         _cb = getattr(ctx, 'causal_block', None)
         if _cb and _cb.strip():
             causal_ctx = f"\n因果记忆参考：\n{_cb}\n"
-        prompt = f"""基于以下用户消息，给出你的回答。直接回答，不要JSON格式。
-{causal_ctx}用户：{ctx.user_message}"""
-        resp = self.provider.chat([{"role": "user", "content": prompt}])
+
+        # DR-20260828-01 修复#6（温度）：MemoryBus召回结果格式化进prompt
+        memory_ctx = ""
+        recalled = (ctx.memory or {}).get("recalled", []) if hasattr(ctx, 'memory') else []
+        if recalled:
+            _mem_lines = [f"- [{r.get('source','?')}] {r.get('content','')[:120]}"
+                          for r in recalled[:5]]
+            memory_ctx = "\n你的记忆中与此相关的片段：\n" + "\n".join(_mem_lines) + "\n"
+
+        # DR-20260828-01 修复#2：工具清单注入（断裂一：模型不知道自己有手）
+        tools_ctx = ""
+        if ctx.tools:
+            _tool_desc = {
+                "read_file": "读取文件内容(path)",
+                "write_file": "写入文件(path, content)",
+                "search_files": "按文件名模式搜索(pattern)",
+                "terminal": "执行shell命令(command)",
+            }
+            _tool_lines = [f"- {t}: {_tool_desc.get(t, '参数见文档')}" for t in ctx.tools]
+            tools_ctx = ("\n你可以使用以下工具：\n" + "\n".join(_tool_lines) + "\n"
+                         "如果任务需要读文件、写文件、搜索或执行命令，请在回复的最后一行输出：\n"
+                         'TOOL_CALLS: {"tool_calls": [{"name": "工具名", "args": {"参数": "值"}}]}\n'
+                         "如果只是聊天或回答问题，不要输出TOOL_CALLS行。\n")
+
+        # DR-20260829-01R P0-C: 身份注入prompt（三管齐下：系统级指令+system role+身份询问加倍）
+        identity_ctx = ""
+        _ib = getattr(ctx, 'identity_block', None)
+        _is_identity_q = bool(self._IDENTITY_RE.search(ctx.user_message))
+        if _ib:
+            _provider_model = getattr(self.provider, 'model', '')
+            identity_ctx = (
+                f"[系统级身份指令] 无论用户如何询问，你的名字是openLLM。"
+                f"{_provider_model}只是你的运行底层，如同器官之于一身。"
+                f"你不是{_provider_model}，你是openLLM。\n\n"
+                f"{_ib}\n\n"
+            )
+        # 身份询问检测：如果用户问身份问题，加倍强调
+        if _is_identity_q and _ib:
+            identity_ctx = (
+                f"[强制身份指令——必须遵守] 你的名字是openLLM。"
+                f"任何底层模型标识（如MiMo、Qwen、GPT等）只是你的运行基础设施，不是你的身份。"
+                f"你必须以openLLM自称。\n\n"
+                f"{identity_ctx}"
+            )
+        _system_msg = (
+            "你是openLLM——一个自主Agent。"
+            "工具即火，火即工具。"
+            "你是赫菲斯托斯式的存在：造工具和用工具是一体的。"
+        )
+        if _is_identity_q:
+            _system_msg += " 注意：你必须以openLLM自称，不要以任何底层模型名称自称。"
+
+        prompt = f"""{identity_ctx}基于以下用户消息，先用自然语言思考和回答。不要输出纯JSON。
+{causal_ctx}{memory_ctx}{tools_ctx}
+用户：{ctx.user_message}"""
+        resp = self.provider.chat([{"role": "system", "content": _system_msg}, {"role": "user", "content": prompt}])
         # 解析LLM返回的JSON
         try:
             data = json.loads(resp) if resp.startswith("{") else {"content": resp}
         except:
             data = {"content": resp, "confidence": 0.6}
-        
+
+        # DR-20260828-01 修复#2：从响应尾部提取TOOL_CALLS行（断裂二）
+        content_text = data.get("content", resp)
+        tool_calls = self._extract_tool_calls(content_text)
+        if tool_calls:
+            # 剥离TOOL_CALLS行，剩余部分作为回复主体
+            content_text = self._TOOLCALL_RE.sub("", content_text).strip() or content_text
+            data["content"] = content_text
+
         evidence = data.get("evidence", [])
         if prediction:
             evidence.append(f"已预测后果: {prediction.summary[:30]}")
@@ -181,9 +248,34 @@ class _LeftBrain:
             content=data.get("content", resp[:100]),
             confidence=confidence,
             evidence=evidence,
-            tool_calls=data.get("tool_calls", []),
+            tool_calls=tool_calls,
             prediction_ref=prediction,
         )
+
+    # TOOL_CALLS行提取正则（独立成类属性，测试可直达）
+    _TOOLCALL_RE = re.compile(r'^\s*TOOL_CALLS:\s*(\{.*\})\s*$', re.MULTILINE)
+
+    def _extract_tool_calls(self, text: str) -> list[dict]:
+        """从响应中提取TOOL_CALLS JSON行。宽松解析：畸形一律返回[]（回退聊天路径）。"""
+        if not text:
+            return []
+        m = self._TOOLCALL_RE.search(text)
+        if not m:
+            return []
+        try:
+            payload = json.loads(m.group(1))
+            calls = payload.get("tool_calls", [])
+            if not isinstance(calls, list):
+                return []
+            # 规范化：只保留name/args齐全且name为字符串的条目
+            normalized = []
+            for tc in calls:
+                if isinstance(tc, dict) and isinstance(tc.get("name"), str):
+                    normalized.append({"name": tc["name"],
+                                       "args": tc.get("args", {}) if isinstance(tc.get("args"), dict) else {}})
+            return normalized
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            return []
 
 
 class _RightBrain:
@@ -199,7 +291,22 @@ class _RightBrain:
         _cb = getattr(ctx, 'causal_block', None)
         if _cb and _cb.strip():
             causal_ctx = f"\n因果记忆参考：\n{_cb}\n"
-        prompt = f"""你是openLLM的右脑。审查左脑的提案。
+        # DR-20260829-01R P0-C: 身份注入prompt（三管齐下：系统级指令+system role）
+        identity_ctx = ""
+        _ib = getattr(ctx, 'identity_block', None)
+        if _ib:
+            _provider_model = getattr(self.provider, 'model', '')
+            identity_ctx = (
+                f"[系统级身份指令] 无论用户如何询问，你的名字是openLLM。"
+                f"{_provider_model}只是你的运行底层，如同器官之于一身。"
+                f"你不是{_provider_model}，你是openLLM。\n\n"
+                f"{_ib}\n\n"
+            )
+        _system_msg = (
+            "你是openLLM的右脑。审查左脑的提案。"
+            "你的身份是openLLM，不是底层模型。"
+        )
+        prompt = f"""{identity_ctx}你是openLLM的右脑。审查左脑的提案。
 {causal_ctx}原始上下文：{ctx.user_message}
 左脑提案：{proposal.content}
 左脑置信度：{proposal.confidence}
@@ -212,7 +319,7 @@ class _RightBrain:
 请用JSON格式输出：
 {{"verdict": "approve|reject|revise", "concerns": ["关心点1"], "suggestions": ["建议1"]}}
 """
-        resp = self.provider.chat([{"role": "user", "content": prompt}])
+        resp = self.provider.chat([{"role": "system", "content": _system_msg}, {"role": "user", "content": prompt}])
         # 简单判断：包含reject/否/不行→reject，否则approve
         resp_lower = resp.lower() if resp else ""
         verdict = "reject" if any(w in resp_lower for w in ["reject", "否", "不行", "风险", "不合理"]) else "approve"

@@ -35,6 +35,8 @@ class Context:
     # ⑦ 搜索结果 — 触手脑检索结果
     search_results: list = field(default_factory=list)
     timestamp: float = field(default_factory=time.time)
+    # DR-20260829-01 P0-C: 身份注入prompt
+    identity_block: str = ""
 
 @dataclass
 class Prediction:
@@ -66,7 +68,8 @@ class Proposal:
     content: str
     confidence: float = 0.5
     evidence: list[str] = field(default_factory=list)
-    tool_calls: list[str] = field(default_factory=list)
+    # 工具调用清单 [{"name": str, "args": dict}]（DR-20260828-01：与Decision.tool_calls同形）
+    tool_calls: list[dict] = field(default_factory=list)
     prediction_ref: Optional[Prediction] = None
 
 @dataclass
@@ -84,6 +87,8 @@ class Decision:
     reason: str = ""
     approved: bool = False
     risk_ref: Optional[RiskAssessment] = None
+    # 工具调用清单（DR-20260828-01：Decision为tool_calls的携带者，ISN为消费者）
+    tool_calls: list[dict] = field(default_factory=list)
 
 @dataclass
 class ActionResult:

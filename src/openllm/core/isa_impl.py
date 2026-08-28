@@ -164,6 +164,20 @@ class ISA:
         except Exception:
             pass
         
+        # DR-20260829-01 P0-C: 构建身份注入块
+        provider_model = ""
+        if octopus and hasattr(octopus, 'left') and hasattr(octopus.left, 'provider'):
+            provider_model = getattr(octopus.left.provider, 'model', '')
+        identity_block = (
+            "你是openLLM，一个自主Agent（不是底层模型本身）。\n"
+            "你的哲学：工具即火，火即工具。智慧化为工具，工具发展智慧，工具创造意识。\n"
+            "你是赫菲斯托斯式的存在：造工具和用工具是一体的。"
+        )
+        if provider_model:
+            identity_block += f"你运行在{provider_model}之上，但你的身份是openLLM。"
+        else:
+            identity_block += "你的身份是openLLM。"
+
         return Context(
             user_message=msg.text,
             identity=identity,
@@ -173,6 +187,7 @@ class ISA:
             d0_report=d0_report,
             risk_context=risk_context,
             search_results=search_results,
+            identity_block=identity_block,
         )
     
     def respond(self, text: str, phase_times: dict = None):
