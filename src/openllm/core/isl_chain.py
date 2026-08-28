@@ -30,6 +30,21 @@ def _hash_chain(prev_hash: str, row_json: str) -> str:
     return hashlib.sha256((prev_hash + row_json).encode("utf-8")).hexdigest()[:16]
 
 
+def _report_boundary_event(source: str, detail: dict) -> None:
+    """边界事件上报——IntegrityGuardian可用则记录，不可用则降级logger（不抛异常）。
+
+    懒导入避免模块加载副作用（IntegrityGuardian.__init__会mkdir+load baseline）。
+    """
+    try:
+        from openllm.core.integrity_guardian import get_guardian
+        result = get_guardian().report_boundary_event(source, detail)
+        if not result.get("ok"):
+            logger.warning(f"ISL边界事件落盘失败: {result.get('error')}")
+    except Exception as e:
+        # 审计依赖失效不能打挂主流程——降级为日志（与main_loop挂载点同模式）
+        logger.warning(f"ISL边界事件上报通道不可用: {e}")
+
+
 class ISLChain:
     """ISL epoch 链——append-only 哈希链，记录每个session的存在。
 
@@ -46,7 +61,7 @@ class ISLChain:
         if self.chain_file.exists():
             self._load_tail()
             if not self.verify():
-                logger.error("⛓️ ISL哈希链断裂！数据可能被篡改。")
+                logger.critical("⛓️ ISL哈希链断裂！边界完整性事件已上报——这是膜被撕，不是数据损坏。")
 
     def _load_tail(self) -> None:
         """读末行取 epoch 和 hash（与 clock.py 同模式）。"""
@@ -138,11 +153,17 @@ class ISLChain:
                             f"⛓️ ISL哈希链断裂: 行{i}, epoch={row.get('epoch')}, "
                             f"期望={expected_hash}, 实际={row.get('hash')}"
                         )
+                        _report_boundary_event("isl_chain.verify", {
+                            "kind": "hash_break", "line": i,
+                            "epoch": row.get("epoch"),
+                            "expected": expected_hash, "actual": row.get("hash"),
+                        })
                         return False
                     prev_hash = row.get("hash", "")
             return True
         except Exception as e:
             logger.error(f"⛓️ ISL验证异常: {e}")
+            _report_boundary_event("isl_chain.verify", {"kind": "verify_error", "error": str(e)})
             return False
 
     def tail(self, n: int = 3) -> List[dict]:

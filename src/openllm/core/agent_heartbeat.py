@@ -262,6 +262,8 @@ def _execute(agent, hc, turn):
     t6 = time.time()
     result = agent.isn.execute(decision)
     hc.result = result
+    # DR-20260828-01 修复#4：tool_calls写入协议上下文（接通断裂四：IKO场景分类）
+    hc.tool_calls = getattr(decision, 'tool_calls', []) or []
     turn.trace_phase("execute", "ok" if result.success else "error",
                      duration_ms=result.duration_ms)
     agent.iko.trace("execute", "ok" if result.success else "error")
@@ -374,7 +376,8 @@ def _learn(agent, hc, turn):
         risk_map = {"low": "LOW", "medium": "MEDIUM", "high": "HIGH"}
         ctx_for_iko = {
             "risk_level": risk_map.get(getattr(hc.risk, 'level', 'low'), "LOW") if hc.risk else "LOW",
-            "has_tool_calls": bool(getattr(decision, 'tool_calls', None)),
+            # DR-20260828-01 修复#4：优先取协议字段（EXECUTE已填充），回退decision（向后兼容）
+            "has_tool_calls": bool(hc.tool_calls) or bool(getattr(decision, 'tool_calls', None)),
             "has_side_effects": bool(getattr(result, 'success', False) and getattr(result, 'output', '')),
             "option_count": max(1, len(getattr(proposal, 'evidence', []))),
         }

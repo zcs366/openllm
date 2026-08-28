@@ -42,6 +42,8 @@ class HeartbeatContext:
     # ── 执行层输出 ──
     result: Optional[ActionResult] = None              # ISN: 执行结果
     output: str = ""                                   # IKO: 最终输出
+    # DR-20260828-01：tool_calls升为协议一等公民（左脑产生→Decision携带→ISN消费→此处全程可见）
+    tool_calls: list = field(default_factory=list)     # 本轮实际执行的工具调用清单
     
     # ── 研究层输出 ──
     research: Optional[dict] = None                    # 研究循环: 假说/实验/结论状态

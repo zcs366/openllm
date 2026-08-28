@@ -30,3 +30,19 @@ def _isolate_causal_store(tmp_path, monkeypatch):
     monkeypatch.setattr(
         isl_chain_mod, "DEFAULT_ISL_CHAIN_FILE", tmp_path / "isl_test.jsonl"
     )
+
+    # P5：IntegrityGuardian生产路径隔离——测试不得创建~/.openllm/output/integrity/
+    # 先重置单例（_guardian持有旧Path），再monkeypatch类属性
+    try:
+        from openllm.core import integrity_guardian as _ig_mod
+        monkeypatch.setattr(_ig_mod, "_guardian", None)
+        monkeypatch.setattr(
+            _ig_mod.IntegrityGuardian, "BASELINE_PATH",
+            tmp_path / "integrity_test" / "baseline.json",
+        )
+        monkeypatch.setattr(
+            _ig_mod.IntegrityGuardian, "AUDIT_LOG_PATH",
+            tmp_path / "integrity_test" / "audit_log.jsonl",
+        )
+    except Exception:
+        pass

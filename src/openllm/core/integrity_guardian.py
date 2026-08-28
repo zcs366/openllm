@@ -256,6 +256,25 @@ class IntegrityGuardian:
             ) if self._baseline else None,
         }
 
+    def report_boundary_event(self, source: str, detail: dict) -> dict:
+        """边界完整性事件上报（P5：ISL断链=膜被撕，非普通数据损坏）。
+
+        事件写入审计日志（append-only），与_integrity检查共用AUDIT_LOG_PATH。
+        任何单一来源的事件上报失败不得抛出异常（降级为返回ok=False）。
+        """
+        entry = {
+            "ts": time.time(),
+            "event_type": "boundary_integrity",
+            "source": source,
+            "detail": detail,
+        }
+        try:
+            with open(self.AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            return {"ok": True, "logged": entry}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
 
 # ── 集成点 ──────────────────────────────────────────
 

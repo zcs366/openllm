@@ -42,6 +42,7 @@ def arbitrate(ios, proposal: Proposal, critique: Critique,
             approved=True,
             reason=f"Level 1: 单左脑提案通过（风险={risk.level if risk else 'low'}）",
             risk_ref=risk,
+            tool_calls=getattr(proposal, 'tool_calls', []) or [],
         )
     
     # Level 2: self_consistency — TODO: M1实现真正的self_consistency
@@ -51,6 +52,7 @@ def arbitrate(ios, proposal: Proposal, critique: Critique,
             approved=True,
             reason=f"Level 2: self_consistency TODO·M1实现（降级为Level 1）",
             risk_ref=risk,
+            tool_calls=getattr(proposal, 'tool_calls', []) or [],
         )
     
     # Level 3: multi_persona — TODO: M1实现真正的multi_persona
@@ -60,12 +62,14 @@ def arbitrate(ios, proposal: Proposal, critique: Critique,
             approved=True,
             reason=f"Level 3: multi_persona TODO·M1实现（降级为Level 1）",
             risk_ref=risk,
+            tool_calls=getattr(proposal, 'tool_calls', []) or [],
         )
     
     # Level 4: debate — 左脑↔️右脑对弈
     if level == 4:
         if critique.verdict == "approve":
-            return Decision(action="execute", approved=True, reason="Level 4: 右脑通过", risk_ref=risk)
+            return Decision(action="execute", approved=True, reason="Level 4: 右脑通过", risk_ref=risk,
+                            tool_calls=getattr(proposal, 'tool_calls', []) or [])
         if critique.verdict == "reject":
             decision = Decision(action="deny", approved=False, 
                           reason=f"Level 4: 右脑否决: {critique.concerns[0] if critique.concerns else '无理由'}",
@@ -75,12 +79,14 @@ def arbitrate(ios, proposal: Proposal, critique: Critique,
         if critique.verdict == "revise":
             if ios._arbiter_policy == "conservative":
                 return Decision(action="revise", approved=False, reason="Level 4: 右脑建议修改，暂缓", risk_ref=risk)
-            return Decision(action="execute", approved=True, reason="Level 4: 策略允许存疑执行", risk_ref=risk)
+            return Decision(action="execute", approved=True, reason="Level 4: 策略允许存疑执行", risk_ref=risk,
+                            tool_calls=getattr(proposal, 'tool_calls', []) or [])
     
     # Level 5: debate_then_verify — 对弈+验证
     if level == 5:
         if critique.verdict == "approve":
-            return Decision(action="execute", approved=True, reason="Level 5: 对弈+验证通过", risk_ref=risk)
+            return Decision(action="execute", approved=True, reason="Level 5: 对弈+验证通过", risk_ref=risk,
+                            tool_calls=getattr(proposal, 'tool_calls', []) or [])
         else:
             decision = Decision(action="deny", approved=False,
                           reason=f"Level 5: critical风险需要明确批准，当前={critique.verdict}",
@@ -89,7 +95,8 @@ def arbitrate(ios, proposal: Proposal, critique: Critique,
             return decision
     
     # 默认放行
-    return Decision(action="execute", approved=True, reason="默认放行", risk_ref=risk)
+    return Decision(action="execute", approved=True, reason="默认放行", risk_ref=risk,
+                    tool_calls=getattr(proposal, 'tool_calls', []) or [])
 
 
 def _record_rejection(ios, proposal: Proposal, decision: Decision, reason: str):

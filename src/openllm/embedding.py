@@ -7,10 +7,12 @@ Default model: all-MiniLM-L6-v2 (384-dim, fast, good general-purpose quality).
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 
 class EmbeddingEngine:
@@ -25,13 +27,17 @@ class EmbeddingEngine:
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
         self._model_name = model_name
-        self._model: Optional[SentenceTransformer] = None  # lazy load
+        self._model: Optional["SentenceTransformer"] = None  # lazy load
 
     # -- lazy loading -------------------------------------------------------
 
-    def _ensure_model(self) -> SentenceTransformer:
+    def _ensure_model(self) -> "SentenceTransformer":
         """Load the underlying SentenceTransformer on first use."""
         if self._model is None:
+            # 惰性import（DR-20260828-01）：sentence_transformers是重依赖链
+            # （torch/transformers），顶层import会阻断整个openllm包的导入。
+            # 模型本身是懒加载的，import与之保持同一惰性语义。
+            from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(self._model_name)
         return self._model
 
