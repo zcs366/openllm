@@ -8,6 +8,14 @@ from .models import *
 from .provider_impl import LLMProvider
 
 
+# ── P2-7: 简单输入快路径常量 ──
+_FAST_PATH_MAX_LEN = 50  # user_message长度阈值
+_TOOL_KEYWORDS = re.compile(
+    r'搜|查|列|读|写|执行|terminal|search|find|run|exec|grep|cat|ls|rm|mv|cp',
+    re.IGNORECASE,
+)
+
+
 def _format_relative_time(ts: float) -> str:
     """Fix P1-20260829-02: 将timestamp转换为相对时间标注。
     
@@ -98,15 +106,51 @@ class 章鱼I:
         }
     
     def predict_consequences(self, ctx: Context) -> Prediction:
-        """Phase 3: 因果预测"""
+        """Phase 3: 因果预测
+        
+        P2-7: 简单输入快路径——直接返回轻量预测，跳过LLM调用。
+        """
+        if self._is_simple_input(ctx, None):
+            return Prediction(summary="[快路径] 简单输入跳过预测", confidence=0.9)
         return self.left.predict(ctx)
     
     def reason(self, ctx: Context, prediction: Optional[Prediction] = None, 
                risk: Optional[RiskAssessment] = None) -> tuple[Proposal, Critique]:
-        """Phase 5: 双脑推理"""
+        """Phase 5: 双脑推理
+        
+        P2-7: 简单输入快路径——短消息且无工具意图时跳过predict/review
+        两次LLM调用（复验实证review对简单输入零拦截，跳过纯省成本）。
+        """
+        if self._is_simple_input(ctx, prediction):
+            proposal = self.left.think(ctx, prediction, risk)
+            critique = Critique(
+                content="[快路径] 简单输入跳过右脑审查",
+                verdict="approve",
+                concerns=[],
+                suggestions=[],
+            )
+            return proposal, critique
         proposal = self.left.think(ctx, prediction, risk)
         critique = self.right.review(ctx, proposal)
         return proposal, critique
+    
+    @staticmethod
+    def _is_simple_input(ctx: Context, prediction: Optional[Prediction]) -> bool:
+        """P2-7: 判定是否简单输入（快路径条件，三重守门）。
+        
+        条件（全部满足才算简单）：
+        1. user_message长度 ≤ _FAST_PATH_MAX_LEN
+        2. 不含工具意图关键词（搜/查/列/写/执行/terminal等）
+        3. 无风险信号（prediction和risk均为空或零风险）
+        """
+        text = (ctx.user_message or "").strip()
+        if not text or len(text) > _FAST_PATH_MAX_LEN:
+            return False
+        if _TOOL_KEYWORDS.search(text):
+            return False
+        if prediction and prediction.risk_signals:
+            return False
+        return True
     
     def compare(self, prediction: Prediction, result: ActionResult) -> CausalDelta:
         """Phase 8: 因果对照"""
