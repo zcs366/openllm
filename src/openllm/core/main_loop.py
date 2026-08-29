@@ -512,8 +512,8 @@ def _run_tests():
     
     # 测试7: IKO可观测
     report = agent.iko.report()
-    assert report["total_ticks"] >= 2  # run_once + 手动
-    print(f"✅ 测试7: 可观测 total_ticks={report['total_ticks']} ok_rate={report['ok_rate']:.0%}")
+    assert report["total_observations"] >= 2  # run_once + 手动
+    print(f"✅ 测试7: 可观测 total_observations={report['total_observations']} ok_rate={report['ok_rate']:.0%}")
     
     # 测试8: IO-S自我进化
     print(f"✅ 测试8: 进化日志 {len(agent.ios.evolution_log)}条（>=1）")

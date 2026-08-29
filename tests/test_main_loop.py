@@ -90,7 +90,7 @@ def test_iko_trace_and_report():
     iko = IKO()
     iko.trace("test", "ok", detail="test detail")
     report = iko.report()
-    assert report["total_ticks"] == 1
+    assert report["total_observations"] == 1
     assert report["ok_rate"] == 1.0
     assert report["last_phase"] == "test"
     print("✓ IKO trace/report 正常")

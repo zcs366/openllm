@@ -260,6 +260,11 @@ class QualityScorer:
             return "↓"
         return "→"
 
+    @property
+    def sample_count(self) -> int:
+        """已打分轮次总数（用于报告样本数）。"""
+        return len(self._history)
+
 
 # ═══════════════════════════════════════════════════════
 # IKO主体
@@ -323,13 +328,14 @@ class IKO:
             return {"status": "no_data"}
         last_10 = self.metrics[-10:]
         return {
-            "total_ticks": len(self.metrics),
+            "total_observations": len(self.metrics),
             "ok_rate": sum(1 for m in last_10 if m.status == "ok") / max(len(last_10), 1),
             "avg_duration_ms": sum(m.duration_ms for m in last_10) / len(last_10),
             "last_phase": last_10[-1].phase if last_10 else "",
             # 三能力指标
             "avg_quality": round(self.quality_scorer.avg_score, 3),
             "quality_trend": self.quality_scorer.trend(),
+            "quality_sample_count": self.quality_scorer.sample_count,
             "token_remaining": self.token_budget.remaining,
         }
 
@@ -398,8 +404,10 @@ class IKO:
         """关闭时的报告"""
         avg = self.quality_scorer.avg_score
         trend = self.quality_scorer.trend()
-        print(f"\n  IKO 关闭报告: {len(self.metrics)} tick · "
-              f"质量={avg:.2f} {trend} · 最后状态={self.metrics[-1].status if self.metrics else 'N/A'}")
+        n_samples = self.quality_scorer.sample_count
+        trend_label = {"↑": "改善", "→": "稳定", "↓": "退化"}.get(trend, "未知")
+        print(f"\n  IKO 关闭报告: {len(self.metrics)}次观测 · "
+              f"质量={avg:.2f}({n_samples}样本) {trend_label} · 最后状态={self.metrics[-1].status if self.metrics else 'N/A'}")
 
 
 def _compress_output(text: str, max_chars: int) -> str:
