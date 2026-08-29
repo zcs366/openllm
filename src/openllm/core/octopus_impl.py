@@ -6,6 +6,31 @@ from pathlib import Path
 from typing import Any, Optional
 from .models import *
 from .provider_impl import LLMProvider
+
+
+def _format_relative_time(ts: float) -> str:
+    """Fix P1-20260829-02: 将timestamp转换为相对时间标注。
+    
+    <1h → "刚刚", <24h → "{n}小时前", <7d → "{n}天前",
+    >=7d and <=30d → "{n}天前", >30d → "{n}天前[久远]"
+    """
+    if not ts:
+        return "未知时间"
+    now = time.time()
+    diff = now - ts
+    if diff < 0:
+        return "未来"
+    if diff < 3600:
+        return "刚刚"
+    if diff < 86400:
+        hours = int(diff / 3600)
+        return f"{hours}小时前"
+    days = int(diff / 86400)
+    if days <= 30:
+        return f"{days}天前"
+    return f"{days}天前[久远]"
+
+
 class 章鱼I:
     """推理引擎 + 左右脑"""
     
@@ -164,12 +189,21 @@ class _LeftBrain:
             causal_ctx = f"\n因果记忆参考：\n{_cb}\n"
 
         # DR-20260828-01 修复#6（温度）：MemoryBus召回结果格式化进prompt
+        # Fix P1-20260829-02: 加相对时间标注 + 防混淆提示
         memory_ctx = ""
         recalled = (ctx.memory or {}).get("recalled", []) if hasattr(ctx, 'memory') else []
         if recalled:
-            _mem_lines = [f"- [{r.get('source','?')}] {r.get('content','')[:120]}"
-                          for r in recalled[:5]]
-            memory_ctx = "\n你的记忆中与此相关的片段：\n" + "\n".join(_mem_lines) + "\n"
+            _mem_lines = []
+            for r in recalled[:5]:
+                _src = r.get('source', '?')
+                _content = r.get('content', '')[:120]
+                _ts = r.get('timestamp', 0)
+                _rel_time = _format_relative_time(_ts)
+                _mem_lines.append(f"- [{_src}|{_rel_time}] {_content}")
+            memory_ctx = (
+                "\n你的记忆中与此相关的片段（注意区分'刚刚'与久远记忆，不要把历史存档当当前对话）：\n"
+                + "\n".join(_mem_lines) + "\n"
+            )
 
         # DR-20260828-01 修复#2：工具清单注入（断裂一：模型不知道自己有手）
         tools_ctx = ""

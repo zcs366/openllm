@@ -87,7 +87,8 @@ class ISA:
                 if records:
                     memory["recalled"] = [
                         {"content": r.content[:200], "importance": r.importance,
-                         "source": r.source, "score": r.score}
+                         "source": r.source, "score": r.score,
+                         "timestamp": r.timestamp}
                         for r in records
                     ]
             except Exception as _e:

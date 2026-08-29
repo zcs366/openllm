@@ -54,6 +54,7 @@ class AutoCausalWriter:
         actual: str,
         success: bool,
         context: str = "",
+        lesson: str = "",
     ) -> dict:
         """
         记录一条因果记忆。
@@ -79,9 +80,30 @@ class AutoCausalWriter:
         else:
             delta_magnitude = min(1.0, len(delta_text) / 100.0)
 
-        # 生成 lesson
-        status = "成功" if success else "失败"
-        lesson = f"{status}: {action[:50]} -> {actual[:50]}"
+        # Fix P1-20260829-02: lesson升级为因果结构
+        # DR-20260829-02R: 调用方可显式传lesson（learn_causal已构建因果结构版），
+        # 未传时才本地生成；本地生成同样过滤零信息预测头
+        if not lesson:
+            if success:
+                strategy_kw = ""
+                for seg in (prediction or "").split("|"):
+                    seg = seg.strip()
+                    if not seg or seg.startswith("[数学]") or "预测类型=" in seg:
+                        continue
+                    if seg.startswith("[LLM]"):
+                        seg = seg[4:].strip().lstrip("]：: ")
+                    if len(seg) >= 6:
+                        # 过滤markdown代码块/换行残留，保持lesson单行可读
+                        seg = seg.replace("```", "").replace("\n", " ").strip()
+                        if len(seg) >= 6:
+                            strategy_kw = seg
+                            break
+                if not strategy_kw:
+                    strategy_kw = (prediction or action)[:30]
+                lesson = f"{action[:50]} 因采取了{strategy_kw[:40]}策略而成功"
+            else:
+                cause = context if context and context != "unknown" else "未明确原因"
+                lesson = f"{action[:50]} 因{cause}而失败，教训：{actual[:50]}"
 
         # 构建因果记忆记录
         memory_id = f"auto-{int(time.time() * 1000) % 100000000:08d}"
@@ -115,7 +137,6 @@ class AutoCausalWriter:
             )
         except Exception as e:
             logger.warning(f"Failed to write causal memory {memory_id}: {e}")
-            return record_data
 
         # 写入审计日志
         try:

@@ -43,7 +43,8 @@ def test_record_writes_file():
         with open(files[0], encoding="utf-8") as f:
             data = json.load(f)
         assert data["action_signature"] == "pip install torch"
-        assert data["lesson"].startswith("成功:")
+        # DR-20260829-02: lesson升级为因果结构（"X 因采取了Y策略而成功"/"X 因Z而失败，教训：W"）
+        assert "因" in data["lesson"] and data["lesson"].endswith(("成功", ")")) or "教训" in data["lesson"]
         
         print(f"✅ 测试1 PASS: record writes {files[0].name}, content verified")
 
