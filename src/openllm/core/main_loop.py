@@ -109,7 +109,76 @@ class Agent:
         # ── 研究引擎（实验+论文+研究循环） ──
         from ..tools.research_loop import ResearchLoop
         self.research = ResearchLoop()
-    
+
+        # ── 启动健康汇总（P2-8） ──
+        self._print_startup_health()
+
+    def _print_startup_health(self):
+        """启动时播报一行健康汇总：读近24h降级日志+活探测embedding/iam/时钟。
+
+        静默模式下不打印（由redirect_stdout自动抑制）。
+        """
+        # 1. embedding 可用性探测
+        emb_sym = "✗"
+        try:
+            from ..embedding import EmbeddingEngine
+            _eng = EmbeddingEngine()
+            _eng.encode("health probe")
+            emb_sym = "✓"
+        except Exception:
+            emb_sym = "✗"
+
+        # 2. iam_harness 加载状态
+        iam_sym = "✗"
+        try:
+            from ..identity.iam_integration import create_iam_integration
+            _iam = create_iam_integration(auto_load=True)
+            iam_sym = "✓" if _iam.is_loaded() else "✗"
+        except Exception:
+            iam_sym = "✗"
+
+        # 3. 时钟链 verify_detailed
+        clock_sym = "✓"
+        clock_detail = ""
+        if self.clock:
+            try:
+                vd = self.clock.verify_detailed()
+                if not vd["ok"]:
+                    n_corrupt = len(vd.get("corrupt", []))
+                    clock_sym = "✗"
+                    clock_detail = f"({n_corrupt} corrupted)"
+                elif vd.get("forks"):
+                    clock_sym = "⚠"
+                    clock_detail = f"({len(vd['forks'])} forks)"
+            except Exception:
+                clock_sym = "?"
+                clock_detail = "(error)"
+
+        # 4. 近24h降级记录
+        degraded = 0
+        try:
+            log_path = Path.home() / ".openllm" / "output" / "degradation_log.jsonl"
+            if log_path.exists():
+                cutoff = time.time() - 86400
+                with open(log_path, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                            if rec.get("timestamp", 0) > cutoff:
+                                degraded += 1
+                        except (json.JSONDecodeError, KeyError):
+                            pass
+        except Exception:
+            pass
+
+        # 汇总播报
+        parts = [f"embedding{emb_sym}", f"iam{iam_sym}", f"时钟{clock_sym}{clock_detail}"]
+        suffix = f" · 近24h降级{degraded}次" if degraded > 0 else ""
+        print(f"  本次启动: {' '.join(parts)}{suffix}")
+
     def run(self):
         """主循环入口"""
         self.running = True
