@@ -19,6 +19,12 @@ class LLMProvider:
         self.endpoint = provider_cfg.get("endpoint", "https://api.deepseek.com/v1/chat/completions")
         self.api_key = provider_cfg.get("api_key", "")
         self._available = bool(self.api_key) or "localhost" in self.endpoint
+        # Gateway fallback: config.json 里 key 为空时读文件
+        if not self.api_key and self.endpoint and "127.0.0.1" in self.endpoint:
+            gw_key = Path.home() / "one-api" / ".gateway_key"
+            if gw_key.exists():
+                self.api_key = gw_key.read_text().strip()
+                self._available = bool(self.api_key)
         self._last_usage: dict = {}
     
     def _load_config(self) -> dict:

@@ -37,6 +37,7 @@ class ProviderType(Enum):
     GEMINI = "gemini"
     LOCAL = "local"
     OLLAMA = "ollama"
+    GATEWAY = "gateway"
 
 
 @dataclass
@@ -477,6 +478,24 @@ def create_provider(provider_type: str = DEFAULT_PROVIDER, **kwargs) -> Any:
             raise ValueError("qwen需要api_key参数")
         logger.info(f"qwen provider: {config.model} @ {config.endpoint}")
         return DeepSeekProvider(config)  # DashScope兼容OpenAI接口
+
+    if provider_type == "gateway":
+        config.endpoint = kwargs.get("endpoint") or "http://127.0.0.1:13000/v1/chat/completions"
+        # 三级 key 获取：kwargs > ~/one-api/.gateway_key > env
+        if not config.api_key:
+            gw_key_path = Path.home() / "one-api" / ".gateway_key"
+            if gw_key_path.exists():
+                config.api_key = gw_key_path.read_text().strip()
+        if not config.api_key:
+            config.api_key = os.environ.get("OPENLLM_GATEWAY_KEY", "")
+        if not config.api_key:
+            raise ValueError("gateway需要api_key或~/one-api/.gateway_key文件")
+        config.model = kwargs.get("model", "gemini-3.6-flash")
+        logger.info(f"gateway provider: {config.model} @ {config.endpoint}")
+        provider = DeepSeekProvider(config)
+        # 禁用代理：网关是本地服务，不应走 Clash/系统代理
+        provider._session.trust_env = False
+        return provider
 
     if provider_type == "deepseek":
         return DeepSeekProvider(config)

@@ -280,6 +280,22 @@ class OpenLLMEngine:
                         api_key = qw.get("api_key", "")
                     endpoint = qw.get("endpoint", "")
                     model = qw.get("model", "qwen3.8-max")
+            elif p == "gateway":
+                gateway_key_path = Path.home() / "one-api" / ".gateway_key"
+                api_key = gateway_key_path.read_text().strip() if gateway_key_path.exists() else ""
+                import json as _json
+                cfg_path = Path.home() / ".openllm" / "config.json"
+                if cfg_path.exists():
+                    cfg = _json.loads(cfg_path.read_text())
+                    gw = cfg.get("providers", {}).get("gateway", {})
+                    if not api_key:
+                        api_key = gw.get("api_key", "")
+                    endpoint = gw.get("endpoint", "http://127.0.0.1:13000/v1/chat/completions")
+                    cfg_model = gw.get("model", "")
+                    if cfg_model:
+                        self.config.model = cfg_model
+                else:
+                    endpoint = "http://127.0.0.1:13000/v1/chat/completions"
             elif p == "anthropic":
                 api_key = os.environ.get("ANTHROPIC_API_KEY", "")
             elif p == "gemini":

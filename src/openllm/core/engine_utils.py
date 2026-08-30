@@ -9,6 +9,7 @@ engine_utils.py — engine小型工具函数
 """
 import os
 import logging
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("openllm.engine.utils")
@@ -29,6 +30,11 @@ def get_api_key(provider: str) -> str:
     """获取当前provider的API key。"""
     if provider == "ollama":
         return "ollama"
+    elif provider == "gateway":
+        gateway_key_path = Path.home() / "one-api" / ".gateway_key"
+        if gateway_key_path.exists():
+            return gateway_key_path.read_text().strip()
+        return os.environ.get("OPENLLM_GATEWAY_KEY", "")
     elif provider == "anthropic":
         return os.environ.get("ANTHROPIC_API_KEY", "")
     elif provider == "gemini":
@@ -46,6 +52,8 @@ def get_api_key(provider: str) -> str:
 
 def get_endpoint(provider: str) -> str:
     """获取当前provider的endpoint URL（从config.json）。"""
+    if provider == "gateway":
+        return "http://127.0.0.1:13000/v1/chat/completions"
     if provider in ("ollama", "mimo", "qwen"):
         import json
         from pathlib import Path as _P
