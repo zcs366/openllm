@@ -78,6 +78,7 @@ class ModelResponse:
     usage: dict = field(default_factory=dict)
     latency_ms: float = 0.0
     finish_reason: str = "stop"
+    tool_calls: Optional[list] = None  # OpenAI原生tool_calls（[{id,type,function:{name,arguments}}]）
 
 
 # ── Provider 实现 ───────────────────────────────────
@@ -99,8 +100,15 @@ class DeepSeekProvider:
         system: Optional[str] = None,
         stream: bool = False,
         on_token: Optional[Callable[[str], None]] = None,
+        tools: Optional[list] = None,
+        tool_choice: Optional[str] = None,
     ) -> ModelResponse:
-        """发送对话请求。"""
+        """发送对话请求。
+
+        tools: OpenAI风格工具声明列表，如
+          [{"type": "function", "function": {"name": ..., "description": ..., "parameters": ...}}]
+        tool_choice: "auto" 等。同步/流式共用同一payload。
+        """
         payload = {
             "model": self.config.model,
             "messages": self._build_messages(messages, system),
@@ -108,6 +116,10 @@ class DeepSeekProvider:
             "temperature": self.config.temperature,
             "stream": stream,
         }
+        if tools:
+            payload["tools"] = tools
+        if tool_choice:
+            payload["tool_choice"] = tool_choice
 
         t0 = time.time()
 
@@ -136,13 +148,17 @@ class DeepSeekProvider:
             resp.raise_for_status()
             data = resp.json()
             choice = data["choices"][0]
+            message = choice.get("message", {})
             usage = data.get("usage", {})
+            # P0修复：解析OpenAI原生tool_calls（纯工具调用时content可能为null）
+            tool_calls = message.get("tool_calls") or None
             response = ModelResponse(
-                content=choice["message"]["content"],
+                content=message.get("content") or "",
                 model=data.get("model", self.config.model),
                 usage=usage,
                 latency_ms=(time.time() - t0) * 1000,
                 finish_reason=choice.get("finish_reason", "stop"),
+                tool_calls=tool_calls,
             )
             # 成本跟踪：写入model trace
             self._record_model_trace(response, usage)
@@ -160,8 +176,14 @@ class DeepSeekProvider:
         on_token: Callable[[str], None],
         t0: float,
     ) -> ModelResponse:
-        """流式调用——逐token回调。"""
+        """流式调用——逐token回调。
+
+        流式tool_calls是分片传输的：每个delta携带index、function.name、
+        function.arguments增量片段，按index合并后还原完整结构。
+        """
         full_content = ""
+        # 流式tool_calls分片累积：index -> 已合并的tool_call dict
+        tool_calls_acc: dict[int, dict] = {}
         try:
             resp = self._session.post(
                 self.config.endpoint,
@@ -191,12 +213,34 @@ class DeepSeekProvider:
                         if token:
                             full_content += token
                             on_token(token)
+                        # P0修复：流式tool_calls按index合并
+                        for tc in (delta.get("tool_calls") or []):
+                            idx = tc.get("index", 0)
+                            slot = tool_calls_acc.setdefault(
+                                idx,
+                                {"id": "", "type": "function",
+                                 "function": {"name": "", "arguments": ""}},
+                            )
+                            if tc.get("id"):
+                                slot["id"] = tc["id"]
+                            if tc.get("type"):
+                                slot["type"] = tc["type"]
+                            fn = tc.get("function") or {}
+                            if fn.get("name"):
+                                slot["function"]["name"] = fn["name"]
+                            if fn.get("arguments"):
+                                slot["function"]["arguments"] += fn["arguments"]
                     except (json.JSONDecodeError, KeyError, IndexError):
                         continue
+            tool_calls = (
+                [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
+                if tool_calls_acc else None
+            )
             response = ModelResponse(
                 content=full_content,
                 model=self.config.model,
                 latency_ms=(time.time() - t0) * 1000,
+                tool_calls=tool_calls,
             )
             # 成本跟踪：流式模式无usage数据，只记录latency
             self._record_model_trace(response, {})

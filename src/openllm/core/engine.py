@@ -123,6 +123,7 @@ class OpenLLMEngine:
         # Provider
         self.provider: Optional[Any] = None  # DeepSeekProvider | AnthropicProvider | GeminiProvider
         self._history: list[Message] = []
+        self._last_model_response: Optional[ModelResponse] = None  # P0: 最近一次模型响应（含tool_calls）
 
         # 元认知
         self.dashboard = CognitiveDashboard(max_context=config.max_context_tokens)
@@ -549,6 +550,100 @@ class OpenLLMEngine:
         "ocr": "file_path",
     }
 
+    # P0: 无注册schema的核心工具默认参数声明（OpenAI风格，比单参数映射更完整）
+    _DEFAULT_TOOL_PARAMS = {
+        "read_file": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "文件路径"},
+            "offset": {"type": "integer", "description": "起始行号"},
+            "limit": {"type": "integer", "description": "读取行数"},
+        }, "required": ["path"]},
+        "write_file": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "文件路径"},
+            "content": {"type": "string", "description": "要写入的文件内容"},
+        }, "required": ["path", "content"]},
+        "shell": {"type": "object", "properties": {
+            "command": {"type": "string", "description": "要执行的Shell命令"},
+            "timeout": {"type": "integer", "description": "超时秒数"},
+            "workdir": {"type": "string", "description": "工作目录"},
+        }, "required": ["command"]},
+        "search": {"type": "object", "properties": {
+            "pattern": {"type": "string", "description": "搜索模式"},
+            "path": {"type": "string", "description": "搜索路径"},
+        }, "required": ["pattern"]},
+        "list_dir": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "目录路径"},
+        }},
+        "python_exec": {"type": "object", "properties": {
+            "code": {"type": "string", "description": "要执行的Python代码"},
+            "timeout": {"type": "integer", "description": "超时秒数"},
+        }, "required": ["code"]},
+    }
+
+    def _build_tools_schema(self) -> list[dict]:
+        """从工具注册表生成OpenAI风格tools声明（function calling）。
+
+        每个工具：{"type": "function", "function": {"name", "description", "parameters"}}。
+        优先用注册时的schema（ToolRegistry._schemas），缺失时用默认参数声明。
+        """
+        tools = []
+        for tool in self.tools.list_tools():
+            name = tool["name"]
+            params = self.tools._schemas.get(name)
+            if not params:
+                params = self._default_tool_schema(name)
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": tool.get("description", ""),
+                    "parameters": params,
+                },
+            })
+        return tools
+
+    def _default_tool_schema(self, name: str) -> dict:
+        """为没有注册schema的工具生成默认参数声明（主参数名复用_TOOL_ARG_MAP）。"""
+        schema = self._DEFAULT_TOOL_PARAMS.get(name)
+        if schema:
+            return schema
+        arg = self._TOOL_ARG_MAP.get(name, "query")
+        return {
+            "type": "object",
+            "properties": {arg: {"type": "string", "description": f"{name}参数"}},
+            "required": [arg],
+        }
+
+    def _extract_structured_tool_calls(self) -> list[dict]:
+        """从最近一次模型响应中提取OpenAI原生tool_calls（可能有多个）。
+
+        无结构化结果时返回空列表，调用方回落正则/路由器路径。
+        """
+        resp = getattr(self, "_last_model_response", None)
+        if resp is None:
+            return []
+        tcs = getattr(resp, "tool_calls", None) or []
+        return [tc for tc in tcs if tc.get("function", {}).get("name")]
+
+    def _run_tool_call(self, tool_name: str, tool_args: dict) -> None:
+        """执行工具调用并把结果注入history（[工具结果: xxx]格式）。"""
+        logger.info(f"工具调用执行: {tool_name}({tool_args})")
+        try:
+            result = self.execute_tool(tool_name, **tool_args)
+            tool_output = result.output if result.success else f"错误: {result.error}"
+        except Exception as e:
+            tool_output = f"工具执行异常: {e}"
+
+        # 空结果保护：工具返回空时注入有意义的反馈
+        if not tool_output or not tool_output.strip():
+            tool_output = f"[工具 {tool_name} 执行完成，但返回了空结果。参数: {tool_args}]"
+
+        # 将工具结果注入历史（只注入工具结果，不注入中间状态的assistant消息）
+        truncated = tool_output[:1500] + '...[truncated]...' + tool_output[-500:] if len(tool_output) > 2000 else tool_output
+        self._history.append(Message(
+            role="user",
+            content=f"[工具结果: {tool_name}] {truncated}"
+        ))
+
     def chat(self, user_input: str, stream: bool = True) -> str:
         """
         一轮完整对话（P0升级：工具执行循环 + 重复检测）。
@@ -634,6 +729,34 @@ class OpenLLMEngine:
         accumulated_text = []  # 累积工具循环中的文本输出
 
         while tool_rounds < self.MAX_TOOL_ROUNDS:
+            # P0修复：优先处理结构化tool_calls（OpenAI原生function calling，可能有多个）
+            structured_calls = self._extract_structured_tool_calls()
+
+            if structured_calls:
+                # 保留模型输出中的文本部分（工具调用之前的文字）
+                text_before_tool = response.strip()
+                if text_before_tool and len(text_before_tool) > 10:
+                    accumulated_text.append(text_before_tool)
+
+                for tc in structured_calls:
+                    tool_name = tc.get("function", {}).get("name", "")
+                    if not tool_name:
+                        continue
+                    # arguments是JSON字符串，解析为dict
+                    try:
+                        tool_args = json.loads(tc.get("function", {}).get("arguments") or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        tool_args = {}
+                    if not isinstance(tool_args, dict):
+                        tool_args = {}
+                    logger.info(f"结构化工具调用: {tool_name}({tool_args})")
+                    self._run_tool_call(tool_name, tool_args)
+
+                # 重新调用模型，让它基于工具结果继续（P1: 改为流式降低感知延迟）
+                response = self._call_model(stream=True)
+                tool_rounds += 1
+                continue
+
             tool_call = self._detect_tool_call(response)
             
             # Tool Router fallback：MiMo不生成代码块时，从自然语言提取意图
@@ -653,22 +776,7 @@ class OpenLLMEngine:
             logger.info(f"工具调用检测: {tool_name}({tool_args})")
 
             # 执行工具
-            try:
-                result = self.execute_tool(tool_name, **tool_args)
-                tool_output = result.output if result.success else f"错误: {result.error}"
-            except Exception as e:
-                tool_output = f"工具执行异常: {e}"
-
-            # 空结果保护：工具返回空时注入有意义的反馈
-            if not tool_output or not tool_output.strip():
-                tool_output = f"[工具 {tool_name} 执行完成，但返回了空结果。参数: {tool_args}]"
-
-            # 将工具结果注入历史（只注入工具结果，不注入中间状态的assistant消息）
-            truncated = tool_output[:1500] + '...[truncated]...' + tool_output[-500:] if len(tool_output) > 2000 else tool_output
-            self._history.append(Message(
-                role="user",
-                content=f"[工具结果: {tool_name}] {truncated}"
-            ))
+            self._run_tool_call(tool_name, tool_args)
 
             # 重新调用模型，让它基于工具结果继续（P1: 改为流式降低感知延迟）
             response = self._call_model(stream=True)
@@ -952,7 +1060,12 @@ class OpenLLMEngine:
         return response
 
     def _call_model(self, stream: bool = True) -> str:
-        """调用模型。带错误分类+指数退避重试（P0: error_classifier集成）。"""
+        """调用模型。带错误分类+指数退避重试（P0: error_classifier集成）。
+
+        P0修复：从工具注册表生成OpenAI风格tools声明传给provider（tool_choice=auto），
+        并把完整响应（含tool_calls）暂存到self._last_model_response供chat()工具循环读取。
+        Anthropic/Gemini协议不同，不传tools。
+        """
         attempt = 0
         max_attempts = 4  # 1 initial + 3 retries
 
@@ -966,18 +1079,27 @@ class OpenLLMEngine:
                     full.append(clean_t)
                     print(clean_t, end="", flush=True)
 
-                resp = self.provider.chat(
-                    messages=self._history,
-                    stream=stream,
-                    on_token=on_token if stream else None,
-                )
+                chat_kwargs = {
+                    "messages": self._history,
+                    "stream": stream,
+                    "on_token": on_token if stream else None,
+                }
+                # P0修复：结构化工具声明只对OpenAI兼容接口（DeepSeekProvider及其变体）生效
+                if isinstance(self.provider, DeepSeekProvider):
+                    chat_kwargs["tools"] = self._build_tools_schema()
+                    chat_kwargs["tool_choice"] = "auto"
+
+                resp = self.provider.chat(**chat_kwargs)
+
+                # 暂存完整响应（含tool_calls），供chat()工具循环读取
+                self._last_model_response = resp
 
                 # P2: 凭据防火墙——扫描模型输出
                 if stream:
                     print()  # 换行
-                    raw = "".join(full)
+                    raw = "".join(full) or (resp.content or "")
                 else:
-                    raw = resp.content
+                    raw = resp.content or ""
                 return self.firewall.scan_text(raw)
 
             except Exception as e:
