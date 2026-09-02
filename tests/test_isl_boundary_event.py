@@ -9,6 +9,9 @@ T5 红线·生产零写入：整个测试会话后 ~/.openllm/isl_chain.jsonl �
 T6 向后兼容：verify()仍返回纯bool（isinstance(result, bool)）
 """
 import json
+import time as _time
+
+_SESSION_START = _time.time()  # 模块加载时快照（D-6）
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -155,16 +158,21 @@ class TestT5ProductionZeroWrite:
     """T5: 红线·生产零写入"""
 
     def test_no_production_files_written(self):
-        """整个测试会话后 ~/.openllm/isl_chain.jsonl 与
-        ~/.openllm/output/integrity/ 均不存在"""
+        """测试期间不得创建/修改生产路径（容忍测试前已存在的真实运行产物）。
+
+        D-6 修正（2026-08-31）：原实现断言"文件不存在"——但真实运行
+        openLLM（smoke/CLI）会在 ~/.openllm/ 留下合法产物，导致红线
+        测试恒失败。正确语义=记录本模块加载时的快照时间，断言测试期间
+        没有新创建或修改。红线效力不变：测试误写生产文件仍会失败。
+        """
         prod_isl = Path.home() / ".openllm" / "isl_chain.jsonl"
         prod_integrity = Path.home() / ".openllm" / "output" / "integrity"
 
-        assert not prod_isl.exists(), (
-            "红线违反：测试不应创建 ~/.openllm/isl_chain.jsonl"
+        assert not prod_isl.exists() or prod_isl.stat().st_mtime <= _SESSION_START, (
+            "红线违反：测试期间不应创建/修改 ~/.openllm/isl_chain.jsonl"
         )
-        assert not prod_integrity.exists(), (
-            "红线违反：测试不应创建 ~/.openllm/output/integrity/"
+        assert not prod_integrity.exists() or prod_integrity.stat().st_mtime <= _SESSION_START, (
+            "红线违反：测试期间不应创建/修改 ~/.openllm/output/integrity/"
         )
 
 

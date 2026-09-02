@@ -8,8 +8,10 @@ from openllm.iai.event_bus import (
     EventBus, Event, Subscriber, BaseEventEmitter, SignalBridge,
 )
 from openllm.iai.prediction import PredictionEngine
+from openllm.iai.brain import BrainRegistry, BrainActivator, BRAIN_VOCAB
 
 __all__ = [
     "EventBus", "Event", "Subscriber", "BaseEventEmitter", "SignalBridge",
     "PredictionEngine",
+    "BrainRegistry", "BrainActivator", "BRAIN_VOCAB",
 ]

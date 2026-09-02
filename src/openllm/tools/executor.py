@@ -569,4 +569,17 @@ def create_default_tools() -> ToolRegistry:
             "snapshot": {"type": "string"}, "line": {"type": "string"},
         }, "required": ["action"]})
 
+    # ── Doc Parser（PaddleOCR-VL文档结构化解析）─────────────────────
+    from .doc_parser import tool_doc_parser
+    registry.register("doc_parser", tool_doc_parser,
+        "文档结构化解析——表格→Markdown、公式→LaTeX、图表→语义描述(PaddleOCR-VL)",
+        schema={"type": "object", "properties": {
+            "file_path": {"type": "string", "description": "PDF或图片文件路径"},
+            "pages": {"type": "string", "description": "页码范围（仅PDF），如 1-5,8"},
+            "elements": {"type": "string", "enum": ["table","formula","chart","text"],
+                         "description": "聚焦元素类型，省略则自动识别全部"},
+            "output_format": {"type": "string", "enum": ["markdown","json"],
+                              "description": "输出格式（默认markdown）"},
+        }, "required": ["file_path"]})
+
     return registry

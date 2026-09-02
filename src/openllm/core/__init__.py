@@ -7,17 +7,26 @@ from .models import (Message, Context, Prediction, RiskAssessment,
                      Proposal, Critique, Decision, ActionResult,
                      CausalDelta, TickMetrics)
 from .isa_impl import ISA
-from .octopus_impl import 章鱼I
+# 章鱼I延迟导入（避免循环：iai.octopus→core→core.__init__→iai.octopus）
 from .ios_impl import IOS
 from .isn_impl import ISN
 from .iko_impl import IKO
 from .provider_impl import LLMProvider
+from .brain_guardian import BrainGuardian, ChangeResult
 
 # 旧文件（兼容期保留）
 from .loop import AgentLoop, LoopPhase, AgentState, TurnContext
 from .provider import DeepSeekProvider, ModelConfig, ModelResponse, create_provider
 from .engine import OpenLLMEngine, AgentConfig
 from .meta import CognitiveDashboard, MetaSnapshot, CognitiveState, SelfRescue
+
+# 章鱼I延迟导出——首次访问时从iai.octopus加载
+def __getattr__(name):
+    if name == "章鱼I":
+        from openllm.iai.octopus import 章鱼I
+        globals()["章鱼I"] = 章鱼I
+        return 章鱼I
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     # 新文件

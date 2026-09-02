@@ -18,6 +18,7 @@ class Event:
     """事件实体。红线：禁止 terminate/shutdown 类型。"""
     source: str; type: str; timestamp: float; entropy_score: float
     payload: dict[str, Any]
+    brain_id: str = "default"
     event_id: str = field(default_factory=lambda: f"evt-{uuid.uuid4().hex[:12]}")
     _BLOCKED = frozenset({"terminate", "shutdown", "kill", "abort"})
     def __post_init__(self):
@@ -26,18 +27,20 @@ class Event:
     def to_dict(self) -> dict:
         return {"event_id": self.event_id, "source": self.source, "type": self.type,
                 "timestamp": self.timestamp, "entropy_score": self.entropy_score,
-                "payload": self.payload}
+                "brain_id": self.brain_id, "payload": self.payload}
     @classmethod
     def from_dict(cls, d: dict) -> "Event":
         return cls(source=d["source"], type=d["type"], timestamp=d["timestamp"],
                    entropy_score=d.get("entropy_score", 0.0), payload=d.get("payload", {}),
+                   brain_id=d.get("brain_id", "default"),
                    event_id=d.get("event_id", f"evt-{uuid.uuid4().hex[:12]}"))
 
 @dataclass
 class Subscriber:
-    """订阅者，支持 source/type 双维过滤。"""
+    """订阅者，支持 source/type/brain_id 三维过滤。"""
     subscriber_id: str; callback: Callable[[Event], None]
     source_filter: Optional[str] = None; type_filter: Optional[str] = None
+    brain_id_filter: Optional[str] = None  # None=听全部（协作监听），指定=只听该头脑
 
 class EventBus:
     """发布/订阅事件总线。内存分发 + JSONL 持久化。"""
@@ -52,10 +55,12 @@ class EventBus:
 
     def subscribe(self, cb: Callable[[Event], None],
                   source_filter: Optional[str] = None,
-                  type_filter: Optional[str] = None) -> str:
+                  type_filter: Optional[str] = None,
+                  brain_id: Optional[str] = None) -> str:
+        """注册订阅者。brain_id=None 表示听全部（协作监听），指定值=只听该头脑。"""
         sid = f"sub-{uuid.uuid4().hex[:8]}"
         with self._lock:
-            self._subs[sid] = Subscriber(sid, cb, source_filter, type_filter)
+            self._subs[sid] = Subscriber(sid, cb, source_filter, type_filter, brain_id)
         return sid
 
     def unsubscribe(self, sid: str) -> bool:
@@ -79,6 +84,8 @@ class EventBus:
     def _match(self, sub: Subscriber, event: Event) -> bool:
         if sub.source_filter and sub.source_filter != event.source: return False
         if sub.type_filter and sub.type_filter != event.type: return False
+        # brain_id 过滤：None=听全部（协作监听），指定=只匹配该头脑
+        if sub.brain_id_filter is not None and sub.brain_id_filter != event.brain_id: return False
         return True
 
     def get_history(self, source_filter: Optional[str] = None,
@@ -140,9 +147,15 @@ class BaseEventEmitter:
     def __init__(self, bus: EventBus): self._bus = bus
     def emit_event(self, event_type: str, payload: Optional[dict] = None,
                    entropy_score: float = 0.0) -> Event:
+        brain_id = "default"
+        try:
+            from openllm.iai.brain import BrainActivator
+            brain_id = BrainActivator().current() or "default"
+        except Exception:
+            pass
         event = Event(source=self.BODY_NAME, type=event_type,
                       timestamp=time.time(), entropy_score=entropy_score,
-                      payload=payload or {})
+                      payload=payload or {}, brain_id=brain_id)
         self._bus.publish(event)
         return event
 

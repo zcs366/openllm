@@ -10,3 +10,4 @@ caps/
 *.jsonl
 .DS_Store
 venv/
+.venv/

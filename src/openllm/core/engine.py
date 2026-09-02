@@ -548,6 +548,7 @@ class OpenLLMEngine:
         "python_exec": "command", "list_dir": "path",
         "octopus_search": "query", "octopus_self_model": "query",
         "ocr": "file_path",
+        "doc_parser": "file_path",
     }
 
     # P0: 无注册schema的核心工具默认参数声明（OpenAI风格，比单参数映射更完整）

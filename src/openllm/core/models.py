@@ -34,6 +34,10 @@ class Context:
     risk_context: dict = field(default_factory=dict)
     # ⑦ 搜索结果 — 触手脑检索结果
     search_results: list = field(default_factory=list)
+    # 厌倦律 IoR：已处理主题抑制提示（抑制重复关注）
+    ior_hints: list = field(default_factory=list)
+    # 遗忘维 ForgettingCurve：主题衰减打分提示（长时遗忘）
+    forgetting_hints: list = field(default_factory=list)
     timestamp: float = field(default_factory=time.time)
     # DR-20260829-01 P0-C: 身份注入prompt
     identity_block: str = ""

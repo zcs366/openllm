@@ -5,7 +5,7 @@ openLLM Agent主循环 — 三体组装层
 感知层(ISA+章鱼I) → 决策层(IOS) → 执行层(ISN+IKO)
 心跳驱动三层轮流工作。
 """
-import json, os, sys, time, uuid, io, contextlib
+import json, os, sys, time, uuid, io, contextlib, threading
 from pathlib import Path
 
 # 数据模型
@@ -51,12 +51,23 @@ class Agent:
         else:
             self._suppress = None
         
-        # 五体初始化
+        # 六体初始化（IAI融合·2026-09-02：章鱼I是IAI的核心器官，
+        # IAI是章鱼I的感知/通信/学习基础设施——先接线后搬家·Step 1）
+        from ..iai.core import IAI
+        self.iai = IAI()
+        self.octopus = 章鱼I(iai=self.iai)
         self.isa = ISA(mode)
-        self.octopus = 章鱼I()
         self.ios = IOS()
         self.isn = ISN()
         self.iko = IKO()
+
+        # IAI订阅：IKO桥——推理事件trace记录（验证标准4：总线有订阅者）
+        try:
+            self.iai.subscribe(
+                lambda ev: self.iko.trace(f"evt.{ev.type}", "ok"),
+                source_filter="iai")
+        except Exception:
+            pass
         
         # Session/Turn
         # 六体自监督反馈环
@@ -118,15 +129,22 @@ class Agent:
 
         静默模式下不打印（由redirect_stdout自动抑制）。
         """
-        # 1. embedding 可用性探测
+        # 1. embedding 可用性探测（线程超时保护：HF网络卡死时不阻塞实例化）
         emb_sym = "✗"
-        try:
-            from ..embedding import EmbeddingEngine
-            _eng = EmbeddingEngine()
-            _eng.encode("health probe")
-            emb_sym = "✓"
-        except Exception:
-            emb_sym = "✗"
+        _emb_result = [None]
+        def _probe_embedding():
+            try:
+                from ..embedding import EmbeddingEngine
+                _eng = EmbeddingEngine()
+                _eng.encode("health probe")
+                _emb_result[0] = "✓"
+            except Exception:
+                _emb_result[0] = "✗"
+        _emb_thread = threading.Thread(target=_probe_embedding, daemon=True)
+        _emb_thread.start()
+        _emb_thread.join(timeout=3)
+        if _emb_result[0] is not None:
+            emb_sym = _emb_result[0]
 
         # 2. iam_harness 加载状态
         iam_sym = "✗"

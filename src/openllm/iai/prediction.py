@@ -6,10 +6,11 @@ ISA 从被动记录升级为因果推理器官：计算"应该发生什么" vs "
 """
 import math
 import time
+import json
+from pathlib import Path
 from typing import Any, Optional
 
 from openllm.iai.event_bus import EventBus, Event, BaseEventEmitter
-
 
 class PredictionEngine(BaseEventEmitter):
     """因果预测引擎。给定上下文预测下一步输出类型，计算预测误差。"""
@@ -138,3 +139,120 @@ class PredictionEngine(BaseEventEmitter):
             "reroute": reroute,
             "expectation_count": self._count,
         }
+
+    # ── 预测偏差记录（PAL T-F-6：预测律闭环·2026-09-02） ──
+
+    @staticmethod
+    def _errors_file(path: Optional[Path] = None) -> Path:
+        """返回预测偏差JSONL文件路径。"""
+        return path or (Path.home() / ".openllm" / "iai" / "prediction_errors.jsonl")
+
+    def record_error(self, prediction: dict, actual: dict,
+                     source: str = "compare",
+                     errors_file: Optional[Path] = None) -> dict:
+        """记录预测偏差。独立验证：user_feedback直录，compare需match=False。
+
+        预测律闭环（赫尔墨斯铁律）：
+        - source='user_feedback' → 已独立验证，直接记录+emit
+        - source='compare' → 依赖 delta.prediction_match：True=预测正确不记录
+          （match 字段从 prediction dict 取，不存在则计算）
+
+        返回: {recorded: bool, match: bool, error: float, event_id: str}
+        """
+        # 独立验证：user_feedback 视为外部已确认
+        if source == "user_feedback":
+            match = False  # 外部确认有偏差
+        else:
+            # compare 路径：检查 prediction dict 中的 match 字段
+            # （由 octopus.compare 通过 heartbeat_context 传入）
+            match = prediction.get("match", prediction.get("prediction_match", None))
+            if match is None:
+                # 无显式标记：自行计算偏差
+                error = self.compute_error(prediction, actual)
+                match = error < 0.3  # 低于阈值=预测正确
+
+        if match:
+            return {"recorded": False, "match": True, "error": 0.0, "event_id": ""}
+
+        # 计算偏差值
+        error = self.compute_error(prediction, actual)
+        confidence = prediction.get("confidence", 0.0)
+
+        # 构造偏差记录
+        record = {
+            "predicted": prediction.get("predicted_type", prediction),
+            "actual": actual,
+            "match": False,
+            "source": source,
+            "timestamp": time.time(),
+            "confidence": round(confidence, 4),
+            "error": round(error, 4),
+        }
+
+        # emit prediction.error 事件
+        evt = self.emit_event("prediction.error", record, entropy_score=error)
+
+        # append-only 写 JSONL
+        self._append_error_record(record, errors_file)
+
+        return {
+            "recorded": True,
+            "match": False,
+            "error": round(error, 4),
+            "event_id": evt.event_id,
+        }
+
+    def _append_error_record(self, record: dict,
+                             errors_file: Optional[Path] = None) -> None:
+        """append-only 写预测偏差到 JSONL 文件。失败不阻塞主流程。"""
+        fpath = self._errors_file(errors_file)
+        try:
+            fpath.parent.mkdir(parents=True, exist_ok=True)
+            with open(fpath, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except IOError as e:
+            pass  # 不阻塞主循环
+
+    # ── 状态持久化（IAI融合·2026-09-02：EMA跨调用/跨重启累积） ──
+
+    def to_state(self) -> dict:
+        """导出预测器状态（期望向量+计数+alpha）。"""
+        return {
+            "expectation": self._expectation,
+            "count": self._count,
+            "alpha": self._alpha,
+        }
+
+    def from_state(self, state: dict) -> None:
+        """恢复预测器状态。"""
+        if not state:
+            return
+        self._expectation = state.get(
+            "expectation", [0.0] * self.VECTOR_DIM)
+        self._count = state.get("count", 0)
+        self._alpha = state.get("alpha", self._alpha)
+
+    def save(self, path=None) -> bool:
+        """持久化到JSON文件。"""
+        import json
+        path = Path(path) if path else (
+            Path.home() / ".openllm" / "iai" / "predictor_state.json")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.to_state(), f)
+            return True
+        except Exception:
+            return False
+
+    def load(self, path=None) -> bool:
+        """从JSON文件恢复状态。返回是否成功。"""
+        import json
+        path = Path(path) if path else (
+            Path.home() / ".openllm" / "iai" / "predictor_state.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                self.from_state(json.load(f))
+            return True
+        except Exception:
+            return False

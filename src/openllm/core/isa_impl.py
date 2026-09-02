@@ -23,6 +23,10 @@ class ISA:
             self.causal = get_causal_store(_base / "causal")
         except Exception:
             self.causal = None
+        # 厌倦律 IoR — 已处理主题过滤器（延迟初始化）
+        self._ior_filter = None
+        # 遗忘维 ForgettingCurve — 长时衰减打分（延迟初始化）
+        self._forgetting_curve = None
         print(f"  ISA[{self.session_id[:8]}] UI层就绪 · 模式={mode}")
 
     def _get_memory_bus(self):
@@ -34,6 +38,26 @@ class ISA:
             except Exception:
                 pass
         return self._memory_bus
+
+    def _get_ior_filter(self):
+        """延迟获取IoRFilter实例（避免启动时IO，避免循环依赖）"""
+        if self._ior_filter is None:
+            try:
+                from ..iai.ior_filter import IoRFilter
+                self._ior_filter = IoRFilter()
+            except Exception:
+                pass
+        return self._ior_filter
+
+    def _get_forgetting_curve(self):
+        """延迟获取ForgettingCurve实例（避免启动时IO，避免循环依赖）"""
+        if self._forgetting_curve is None:
+            try:
+                from ..iai.forgetting import ForgettingCurve
+                self._forgetting_curve = ForgettingCurve()
+            except Exception:
+                pass
+        return self._forgetting_curve
         
     def listen(self) -> Optional[Message]:
         """获取用户输入"""
@@ -156,6 +180,39 @@ class ISA:
             if idx:
                 results = idx.search(msg.text, limit=5)
                 search_results = [s.get("filepath", "") for s in results]
+        # 厌倦律 IoR：抑制已处理主题的搜索候选（不改变搜索本身，只过滤上下文）
+        ior_hints = []
+        ior = self._get_ior_filter()
+        if ior:
+            try:
+                search_results = ior.suppress(search_results)
+                recent = ior.get_recent(limit=5)
+                if recent:
+                    ior_hints = [f"已处理主题（不重复）：{'、'.join(recent)}"]
+            except Exception as _e:
+                trace_degradation("ISA", "build_context IoR", _e)
+        # 遗忘维 ForgettingCurve：对记忆召回结果做衰减重排（保守接入，不动ISA核心）
+        forgetting_hints = []
+        fc = self._get_forgetting_curve()
+        if fc and "recalled" in memory and memory["recalled"]:
+            try:
+                ior_set = set()
+                if ior:
+                    ior_set = set(ior.get_recent(limit=20))
+                scored = []
+                for item in memory["recalled"]:
+                    topic = item.get("content", "")[:40]
+                    s = fc.score(topic, ior_handled=(topic in ior_set))
+                    scored.append((item, s))
+                scored.sort(key=lambda x: x[1], reverse=True)
+                memory["recalled"] = [item for item, _ in scored]
+                # 注入衰减提示（让LLM知道哪些记忆正在淡去）
+                cold_items = [(item, s) for item, s in scored if s < 0.3]
+                if cold_items:
+                    cold_names = [c[0].get("content", "")[:30] for c in cold_items[:3]]
+                    forgetting_hints = [f"淡忘中（可能不再相关）：{'、'.join(cold_names)}"]
+            except Exception as _e:
+                trace_degradation("ISA", "build_context ForgettingCurve", _e)
         # [进化] 接入evidence_replay
         try:
             from ..memory.evidence_replay import create_replay_for_context
@@ -188,6 +245,8 @@ class ISA:
             d0_report=d0_report,
             risk_context=risk_context,
             search_results=search_results,
+            ior_hints=ior_hints,
+            forgetting_hints=forgetting_hints,
             identity_block=identity_block,
         )
     

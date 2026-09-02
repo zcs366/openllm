@@ -9,6 +9,7 @@ PERCEIVE → DECIDE → EXECUTE → LEARN → FEEDBACK
 - 执行层写：result, output, metrics
 """
 import time
+from pathlib import Path
 from typing import Optional
 from .models import (Message, Context, Prediction, RiskAssessment,
                      Proposal, Critique, Decision, ActionResult)
@@ -20,7 +21,7 @@ def execute_tick(agent, msg: Message):
     """5阶段心跳：PERCEIVE→DECIDE→EXECUTE→LEARN→FEEDBACK
 
     从12阶段精简而来：
-    - listen/governance×2 删除（空壳）
+    - listen 删除（空壳）；governance×2 已恢复为治理trace写入（G-1·2026-09-01）
     - search+replay+predict 合并为 PERCEIVE
     - risk+reason+arbitrate 合并为 DECIDE
     - execute+tool_validator 合并为 EXECUTE
@@ -30,6 +31,16 @@ def execute_tick(agent, msg: Message):
     t0 = time.time()
     agent._tick_start_time = t0
     turn = agent.session.new_turn()
+
+    # 连续性门控：记录主任务延续状态（十律⑥·蜻蜓门控）
+    _current_task = getattr(msg, "text", "") or ""
+    _prev_task = getattr(agent, "_gate_current_task", None)
+    if _prev_task and _prev_task != _current_task:
+        # 主任务切换——发布 blocked=True（保持旧任务轨迹）
+        iai = getattr(agent, "iai", None)
+        if iai is not None:
+            iai.gate("task_switch", _prev_task, blocked=True)
+    agent._gate_current_task = _current_task
 
     hc = HeartbeatContext(
         user_message=msg.text,
@@ -65,6 +76,11 @@ def execute_tick(agent, msg: Message):
 
         # ═══ Phase 5: FEEDBACK（反馈）═══
         _feedback(agent, hc, turn)
+
+        # 连续性门控：主任务完成→允许切换（blocked=False）
+        iai = getattr(agent, "iai", None)
+        if iai is not None:
+            iai.gate("task_switch", _current_task, blocked=False)
 
         agent._tick_count += 1
         return hc
@@ -191,9 +207,25 @@ def _do_replay(agent, msg, ctx, hc, turn):
 
 # ── Phase 2: DECIDE ────────────────────────────────────────
 
+def _emit(agent, event_type: str, payload=None):
+    """IAI事件发布（失败不阻塞主流程）。IAI融合·2026-09-02。
+
+    推理链路事件源：context.built / reasoning.proposed / reasoning.critiqued
+    / decision.made / action.executed —— 自进化管道（ILM训练三元组）的原料。
+    """
+    iai = getattr(agent, "iai", None)
+    if iai is None:
+        return
+    iai.emit(event_type, payload)
+
+
 def _decide(agent, msg, hc, turn):
     """决策：风险检查 + 方案生成 + 仲裁。返回True表示被拦截。"""
     ctx = agent.isa.build_context(msg, agent.session, agent.octopus, agent.ios)
+    _emit(agent, "context.built", {
+        "user_message": (getattr(msg, "text", "") or "")[:200],
+        "tools": len(ctx.tools) if getattr(ctx, "tools", None) else 0,
+    })
     prediction = hc.prediction
 
     # 2.1 风险检查
@@ -222,6 +254,14 @@ def _decide(agent, msg, hc, turn):
     proposal, critique = agent.octopus.reason(ctx, prediction, risk)
     hc.left_proposal = proposal
     hc.right_critique = critique
+    _emit(agent, "reasoning.proposed", {
+        "content": (getattr(proposal, "content", "") or "")[:200],
+        "confidence": getattr(proposal, "confidence", 0.0),
+    })
+    _emit(agent, "reasoning.critiqued", {
+        "verdict": getattr(critique, "verdict", ""),
+        "concerns": len(getattr(critique, "concerns", []) or []),
+    })
     turn.trace_phase("reason", "ok", duration_ms=(time.time()-t4)*1000)
     agent.iko.trace("reason", "ok")
     agent._record_inference("decide_reason")
@@ -230,6 +270,11 @@ def _decide(agent, msg, hc, turn):
     t5 = time.time()
     decision = agent.ios.arbitrate(proposal, critique, risk)
     hc.decision = decision
+    _emit(agent, "decision.made", {
+        "action": getattr(decision, "action", ""),
+        "approved": bool(getattr(decision, "approved", False)),
+        "reason": (getattr(decision, "reason", "") or "")[:100],
+    })
     turn.trace_phase("decide", "ok" if decision.approved else "denied",
                      duration_ms=(time.time()-t5)*1000, detail=decision.reason)
     agent.iko.trace("decide", "ok" if decision.approved else "denied", detail=decision.reason)
@@ -262,6 +307,11 @@ def _execute(agent, hc, turn):
     t6 = time.time()
     result = agent.isn.execute(decision)
     hc.result = result
+    _emit(agent, "action.executed", {
+        "success": bool(getattr(result, "success", False)),
+        "duration_ms": getattr(result, "duration_ms", 0.0),
+        "error": (getattr(result, "error", "") or "")[:100],
+    })
     # DR-20260828-01 修复#4：tool_calls写入协议上下文（接通断裂四：IKO场景分类）
     hc.tool_calls = getattr(decision, 'tool_calls', []) or []
     turn.trace_phase("execute", "ok" if result.success else "error",
@@ -328,7 +378,40 @@ def _learn(agent, hc, turn):
     # 4.1 因果比较
     t7 = time.time()
     delta = agent.octopus.compare(prediction, result)
-    agent.ios.learn_causal(ctx, prediction, result, delta)
+
+    # PAL T-G-2: SelfModificationGuard 激活 — learn_causal 写入受守卫检查
+    _causal_target = str(Path.home() / ".openllm" / "output" / "ios" / "causal_memory.jsonl")
+    _guard_skipped = False
+    try:
+        from ..governance.self_modification_guard import SelfModificationGuard
+        _guard = SelfModificationGuard()
+        # 写入前：频率限制 + 禁区检查
+        if _guard.check_rate_limit(_causal_target):
+            _guard_skipped = True
+            turn.trace_phase("guard_rate_limit", "skip", detail=f"target={_causal_target}")
+        elif not _guard.approve_change(_causal_target, change_type="causal_memory"):
+            _guard_skipped = True
+            turn.trace_phase("guard_forbidden", "skip", detail=f"target={_causal_target}")
+        else:
+            agent.ios.learn_causal(ctx, prediction, result, delta)
+            agent.octopus.learn_causal(ctx, prediction, result, delta)
+            # 写入后：记录本次修改
+            _guard.record_modification(
+                target_file=_causal_target,
+                change_type="causal_memory",
+                agent_id=getattr(agent, '_agent_id', 'openllm'),
+            )
+            turn.trace_phase("guard_recorded", "ok", detail=f"target={_causal_target}")
+    except Exception as _guard_err:
+        # guard失败不阻塞心跳
+        turn.trace_phase("guard", "skip", detail=str(_guard_err)[:100])
+        if not _guard_skipped:
+            # guard检查阶段未跳过，回退执行learn_causal
+            try:
+                agent.ios.learn_causal(ctx, prediction, result, delta)
+                agent.octopus.learn_causal(ctx, prediction, result, delta)
+            except Exception:
+                pass
 
     # E2 缺口③：因果度量接线（2026-08-23）
     try:
@@ -340,6 +423,21 @@ def _learn(agent, hc, turn):
                 retrieved=_had_causal,
                 influenced=_influenced,
                 lesson=delta.delta_summary,
+            )
+    except Exception:
+        pass  # 不阻塞主循环
+
+    # PAL T-F-6：预测律闭环 — 偏差信号回流（2026-09-02）
+    # 赫尔墨斯铁律：回流信号必须经过独立验证（match=False才记录）
+    try:
+        if agent.iai and agent.iai.predictor:
+            # 将 delta.prediction_match 注入 prediction dict 供 record_error 使用
+            _pred_for_error = dict(prediction) if isinstance(prediction, dict) else {"predicted_type": str(prediction)}
+            _pred_for_error["prediction_match"] = delta.prediction_match
+            agent.iai.predictor.record_error(
+                prediction=_pred_for_error,
+                actual=result if isinstance(result, dict) else {"output": result},
+                source="compare",
             )
     except Exception:
         pass  # 不阻塞主循环
@@ -441,6 +539,24 @@ def _feedback(agent, hc, turn):
 
     # 5.3 过程透明化摘要
     _emit_summary(agent, hc, turn)
+
+    # 5.4 G-1(2026-09-01): 治理trace写入审计链
+    # 零LLM调用、零阻塞。失败静默降级。
+    try:
+        _risk_level = getattr(hc.risk, 'level', 'low') if hc.risk else 'low'
+        _approved = getattr(hc.decision, 'approved', True) if hc.decision else True
+        _reason = getattr(hc.decision, 'reason', '') if hc.decision else ''
+        _duration_ms = (time.time() - getattr(agent, '_tick_start_time', time.time())) * 1000
+        agent.ios.governance_engine.heartbeat_trace(
+            tick_id=getattr(hc, 'tick_id', f"tick_{agent._tick_count}"),
+            risk_level=_risk_level,
+            approved=_approved,
+            decision_reason=_reason,
+            duration_ms=_duration_ms,
+            agent_id=getattr(agent, '_agent_id', 'openllm'),
+        )
+    except Exception:
+        pass  # 心跳治理trace失败不阻断主循环
 
 
 

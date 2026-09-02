@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -16,6 +17,41 @@ DEFAULT_WINDOW_HOURS: int = 24
 DEFAULT_MAX_MODIFICATIONS: int = 3
 DEGRADATION_THRESHOLD: float = 0.10   # reliability 下降 > 10% 触发
 ROLLBACK_CONFIDENCE: float = 0.6     # 退化 + 高频 → 回滚
+
+# --- PAL T-D-3: Hot-swap forbidden path patterns ---
+# ISA memory / Identity Iam / Governance core / Heartbeat ontic
+# These are "my things" — irreversible, never hot-swap.
+FORBIDDEN_PATHS: list[str] = [
+    # ISA memory: ~/.openllm/memory/, *.causal*, *.memory*, memory_bus*, auto_causal*
+    r"[\\/]memory[\\/]isa[\\/]",
+    r"[\\/]isa_impl\.py$",
+    r"[\\/]isa_impl\b",
+    r"[\\/]memory_bus\.py$",
+    r"[\\/]memory_bus\b",
+    r"[\\/]auto_causal_writer\.py$",
+    r"[\\/]causal_memory\.py$",
+    r"[\\/]causal_provider\.py$",
+    r"[\\/]delta_capsule_provider\.py$",
+    r"\.openllm[\\/]memory[\\/]",
+    r"\.openllm[\\/]governance[\\/]self_modification_state\.json$",
+    r"\.causal\w*\.py$",
+    r"\.memory\w*\.py$",
+    # Identity / Iam: soul.py, identity/, iam/
+    r"[\\/]identity[\\/]",
+    r"[\\/]soul\.py$",
+    r"[\\/]iam[\\/]",
+    r"\biam_integration\.py$",
+    # Governance core: governance/ directory
+    r"[\\/]governance[\\/]self_modification_guard\.py$",
+    r"[\\/]governance[\\/]decision_guard\.py$",
+    r"[\\/]governance[\\/]integrity_guardian\.py$",
+    r"[\\/]governance[\\/]",
+    r"[\\/]governance_engine\.py$",
+    r"[\\/]ios_arbitrate\.py$",
+    # Heartbeat ontic: agent_heartbeat.py, core/clock.py
+    r"[\\/]agent_heartbeat\.py$",
+    r"[\\/]clock\.py$",
+]
 
 
 @dataclass
@@ -51,6 +87,40 @@ class SelfModificationGuard:
         self._max_mods = max_modifications
         self._state: dict[str, list[dict]] = self._load_state()
 
+    def is_forbidden(self, target_file: str) -> bool:
+        """Check if target_file matches any FORBIDDEN_PATHS pattern.
+
+        Returns True if the file is in a forbidden zone (ISA memory,
+        identity/Iam, governance core, heartbeat ontic).
+        """
+        for pattern in FORBIDDEN_PATHS:
+            if re.search(pattern, target_file):
+                return True
+        return False
+
+    def approve_change(self, target_file: str, change_type: str = "code") -> bool:
+        """Approve a hot-swap change. Forbidden targets are rejected.
+
+        Returns True if allowed, False if in forbidden zone.
+        When rejected, a forbidden alert is recorded via record_modification.
+        """
+        if self.is_forbidden(target_file):
+            # Audit trail: record the rejection with forbidden alert
+            event = ModificationEvent(
+                target_file=target_file, change_type=change_type,
+                agent_id="system", timestamp=time.time(),
+            )
+            event_dict = asdict(event)
+            event_dict["intent_alert"] = {
+                "severity": "high",
+                "evidence": ["forbidden_path"],
+            }
+            event_dict["forbidden"] = True
+            self._state.setdefault(target_file, []).append(event_dict)
+            self._save_state()
+            return False
+        return True
+
     def record_modification(
         self, target_file: str, change_type: str, agent_id: str,
         reliability_before: Optional[float] = None,
@@ -78,6 +148,15 @@ class SelfModificationGuard:
                     "severity": severity,
                     "evidence": evidence,
                 }
+
+        # PAL T-D-3: forbidden path auto-alert
+        if self.is_forbidden(target_file):
+            event_dict["forbidden"] = True
+            event_dict.setdefault("intent_alert", {})
+            event_dict["intent_alert"]["severity"] = "high"
+            event_dict["intent_alert"].setdefault("evidence", []).append(
+                "forbidden_path"
+            )
 
         self._state.setdefault(target_file, []).append(event_dict)
         self._save_state()

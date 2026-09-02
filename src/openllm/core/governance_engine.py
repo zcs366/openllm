@@ -195,6 +195,44 @@ class GovernanceEngine:
         self.classifier = StructuralFailureClassifier()
         self.rule_store = GovernanceRuleStore()
         self._storage_dir = Path.home() / ".openllm" / "output" / "ios"
+        # G-1(2026-09-01): 心跳治理trace写入审计链
+        self.audit_log = GovernanceAuditLog()
+
+    # ── 心跳治理trace（G-1·2026-09-01） ──────────────
+
+    def heartbeat_trace(
+        self,
+        tick_id: str,
+        risk_level: str = "low",
+        approved: bool = True,
+        decision_reason: str = "",
+        duration_ms: float = 0.0,
+        agent_id: str = "openllm",
+    ) -> int:
+        """每拍心跳产生治理trace，写入审计链。
+
+        零LLM调用、零阻塞。失败静默降级，不阻断心跳。
+        写入governance_audit表，event_type='heartbeat'。
+
+        Returns:
+            审计事件行ID（写入失败返回-1）。
+        """
+        try:
+            details = (
+                f"risk={risk_level} approved={approved} "
+                f"reason={decision_reason[:120]} duration_ms={duration_ms:.0f}"
+            )
+            row_id = self.audit_log.append(
+                event_type="heartbeat",
+                action="tick",
+                agent_id=agent_id,
+                session_id=tick_id,
+                details=details,
+            )
+            return row_id
+        except Exception:
+            return -1  # 失败静默降级
+
     
     # ── 主管线 ──────────────────────────────────────
     
@@ -533,7 +571,32 @@ class GovernanceEngine:
             "rules": rule_stats,
             "classifier": classifier_stats,
             "conversion_history": self._count_conversion_history(),
+            "heartbeat_traces": self._count_heartbeat_traces(),
         }
+
+    def _count_heartbeat_traces(self) -> dict:
+        """统计心跳治理trace记录。"""
+        try:
+            events = self.audit_log.query(event_type="heartbeat", limit=10000)
+            total = len(events)
+            if total == 0:
+                return {"total": 0, "recent_risk": None, "recent_approved": None}
+            latest = events[0]
+            # 从 details 中提取 risk 和 approved
+            risk = None
+            approved = None
+            for part in latest["details"].split():
+                if part.startswith("risk="):
+                    risk = part.split("=", 1)[1]
+                elif part.startswith("approved="):
+                    approved = part.split("=", 1)[1]
+            return {
+                "total": total,
+                "recent_risk": risk,
+                "recent_approved": approved,
+            }
+        except Exception:
+            return {"total": 0, "recent_risk": None, "recent_approved": None}
     
     def _count_conversion_history(self) -> dict:
         """统计治理转换历史"""
