@@ -38,6 +38,11 @@ from .reliability import (
 )
 from .substrate import SubstrateEnforcer, CompiledConstraint, SubstrateGuide
 from .consensus_reasoning import ConsensusReasoning, ReasoningRecord
+from .verification_ledger import (
+    DEFAULT_LEDGER_PATH,
+    VerificationEvidence,
+    VerificationLedger,
+)
 
 __all__ = [
     "GovernanceEvent",
@@ -75,6 +80,9 @@ __all__ = [
     "SubstrateGuide",
     "ConsensusReasoning",
     "ReasoningRecord",
+    "VerificationLedger",
+    "VerificationEvidence",
+    "DEFAULT_LEDGER_PATH",
 ]
 
 # ═══════════════════════════════════════════════════════════════════
