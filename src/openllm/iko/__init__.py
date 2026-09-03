@@ -130,8 +130,15 @@ from openllm.iko.symmetric_codec import (
     SymmetricCodec,
 )
 from openllm.iko.lambda_calibrator import (
-    LambdaCalibrator,
     LambdaState,
+    LambdaCalibrator,
+)
+from openllm.iko.pulse import (
+    Pulse,
+    PulseEngine,
+    PulseTrigger,
+    IntervalTrigger,
+    TimeWindow,
 )
 
 __version__ = "0.1.0"
@@ -163,4 +170,10 @@ __all__ = [
     # lambda_calibrator
     "LambdaState",
     "LambdaCalibrator",
+    # pulse（P1-4 温度脉冲引擎）
+    "Pulse",
+    "PulseEngine",
+    "PulseTrigger",
+    "IntervalTrigger",
+    "TimeWindow",
 ]
