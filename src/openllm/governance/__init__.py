@@ -43,6 +43,14 @@ from .verification_ledger import (
     VerificationEvidence,
     VerificationLedger,
 )
+from .adjudication import (
+    TransmissionAdjudicator,
+    TransmissionRequest,
+    Verdict,
+    PolicyRule,
+    should_transmit,
+    make_request,
+)
 
 __all__ = [
     "GovernanceEvent",
@@ -83,6 +91,12 @@ __all__ = [
     "VerificationLedger",
     "VerificationEvidence",
     "DEFAULT_LEDGER_PATH",
+    "TransmissionAdjudicator",
+    "TransmissionRequest",
+    "Verdict",
+    "PolicyRule",
+    "should_transmit",
+    "make_request",
 ]
 
 # ═══════════════════════════════════════════════════════════════════
