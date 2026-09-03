@@ -309,7 +309,7 @@ class TestSymmetricCodecBoundary:
         assessments = [{"decision": f"dec_{i}"} for i in range(500)]
         chain = FullReasoningChain(phases=phases, risk_assessments=assessments)
         compressed = self.codec.compress(chain)
-        assert compressed.confidence == 0.9
+        assert compressed.confidence == pytest.approx(0.9, abs=1e-9)
         assert len(compressed.key_decisions) == 500
         assert compressed.reversible is True
 
