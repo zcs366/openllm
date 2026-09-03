@@ -25,8 +25,10 @@ class EmbeddingEngine:
         Defaults to ``'all-MiniLM-L6-v2'`` (384-dimensional).
     """
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2",
+                 local_files_only: bool = True) -> None:
         self._model_name = model_name
+        self._local_files_only = local_files_only  # 离线优先：防每次联网 HEAD 检查拖死
         self._model: Optional["SentenceTransformer"] = None  # lazy load
 
     # -- lazy loading -------------------------------------------------------
@@ -37,8 +39,16 @@ class EmbeddingEngine:
             # 惰性import（DR-20260828-01）：sentence_transformers是重依赖链
             # （torch/transformers），顶层import会阻断整个openllm包的导入。
             # 模型本身是懒加载的，import与之保持同一惰性语义。
+            import os
+            if self._local_files_only:
+                # 离线强制（2026-09-04 实测）：ST 5.5.1 即使 local_files_only=True
+                # 仍无条件联网 HEAD 检查 processor_config.json，网络不通时拖死加载。
+                # env 离线模式是唯一可靠拦截；local_files_only=False 时不设（允许下载）。
+                os.environ["HF_HUB_OFFLINE"] = "1"
+                os.environ["TRANSFORMERS_OFFLINE"] = "1"
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self._model_name)
+            self._model = SentenceTransformer(self._model_name,
+                                               local_files_only=self._local_files_only)
         return self._model
 
     # -- public API ---------------------------------------------------------

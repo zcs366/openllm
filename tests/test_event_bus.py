@@ -254,3 +254,136 @@ class TestSignalBridge:
             assert h[0]["type"] == "message"
         finally:
             del sys.modules["openllm.core.signal"]
+
+
+# ── 语义路由测试（P0-2 · ISA通信体战役）──
+
+class _StubMatcher:
+    """可编程语义 stub：固定相似度；raise_error=True 时 is_match 抛异常。"""
+    def __init__(self, sim: float = 0.0, raise_error: bool = False):
+        self.sim = sim
+        self.raise_error = raise_error
+        self.calls: list[tuple] = []
+    def is_match(self, interest, text, threshold):
+        self.calls.append((interest, text, threshold))
+        if self.raise_error:
+            raise RuntimeError("embedding 故障模拟")
+        return self.sim >= threshold
+
+
+class _FakeEngine:
+    """假 embedding 引擎：固定向量，供 SemanticMatcher 数学单测。"""
+    def __init__(self, vec): self._vec = vec
+    def encode(self, text): return self._vec
+
+
+class TestSemanticRouting:
+    """语义路由：精确=硬门槛，语义=相关性层，纯精确订阅行为不变。"""
+
+    def _make_bus(self, matcher):
+        return EventBus(log_dir=Path(tempfile.mkdtemp()), semantic_matcher=matcher)
+
+    def _mk_event(self, source="IAI", etype="insight", payload=None):
+        return Event(source=source, type=etype, timestamp=time.time(),
+                     entropy_score=0.0,
+                     payload=payload or {"text": "模型训练进展报告"},
+                     brain_id="default")
+
+    def test_semantic_hit_receives(self):
+        m = _StubMatcher(sim=0.9)
+        bus = self._make_bus(m)
+        got = []
+        bus.subscribe(lambda e: got.append(e), semantic_filter="模型训练",
+                      semantic_threshold=0.5)
+        bus.publish(self._mk_event())
+        assert len(got) == 1
+        assert m.calls[0][0] == "模型训练"  # 兴趣文本传入匹配器
+
+    def test_semantic_miss_ignored(self):
+        bus = self._make_bus(_StubMatcher(sim=0.2))
+        got = []
+        bus.subscribe(lambda e: got.append(e), semantic_filter="模型训练")
+        bus.publish(self._mk_event())
+        assert got == []
+
+    def test_threshold_boundary(self):
+        # 相似度 == 阈值 → 命中（>= 语义）
+        bus = self._make_bus(_StubMatcher(sim=0.5))
+        got = []
+        bus.subscribe(lambda e: got.append(e), semantic_filter="x",
+                      semantic_threshold=0.5)
+        bus.publish(self._mk_event())
+        assert len(got) == 1
+        # 阈值抬高 → 不命中
+        bus2 = self._make_bus(_StubMatcher(sim=0.5))
+        got2 = []
+        bus2.subscribe(lambda e: got2.append(e), semantic_filter="x",
+                       semantic_threshold=0.6)
+        bus2.publish(self._mk_event())
+        assert got2 == []
+
+    def test_pure_precise_subscription_unchanged(self):
+        """无 semantic_filter：原精确行为不变（向后兼容回归）。"""
+        bus = self._make_bus(_StubMatcher(sim=0.9))  # 即使 sim 高也不触发语义
+        got = []
+        bus.subscribe(lambda e: got.append(e), source_filter="IAI")
+        bus.subscribe(lambda e: got.append(e), source_filter="ISN")
+        bus.publish(self._mk_event(source="IAI"))
+        assert len(got) == 1
+
+    def test_source_hard_gate_overrides_semantic(self):
+        """精确过滤器是硬门槛：source 不匹配时语义再高也不通知。"""
+        bus = self._make_bus(_StubMatcher(sim=0.99))
+        got = []
+        bus.subscribe(lambda e: got.append(e), source_filter="ISN",
+                      semantic_filter="模型训练")
+        bus.publish(self._mk_event(source="IAI"))  # 语义相关但 source 不符
+        assert got == []
+
+    def test_semantic_exception_degrades_safely(self):
+        """语义判定抛异常 → publish 不崩溃、订阅者不被通知。"""
+        bus = self._make_bus(_StubMatcher(sim=0.9, raise_error=True))
+        got = []
+        bus.subscribe(lambda e: got.append(e), semantic_filter="模型训练")
+        bus.publish(self._mk_event())  # 不应抛
+        assert got == []
+
+    def test_payload_text_extraction_priority(self):
+        from openllm.iai.event_semantic import event_payload_to_text
+        assert event_payload_to_text({"text": "a", "body": "b"}) == "a"
+        assert event_payload_to_text({"body": "b", "content": "c"}) == "b"
+        assert event_payload_to_text({"message": "m"}) == "m"
+        assert event_payload_to_text({"note": "n"}) == '{"note": "n"}'
+
+    def test_semantic_matcher_math_and_degrade(self):
+        """SemanticMatcher：cosine 数学 + 零向量 + encode 异常降级 None。"""
+        from openllm.iai.event_semantic import SemanticMatcher
+        m = SemanticMatcher()
+        m._engine = _FakeEngine([1.0, 0.0, 0.0])
+        assert m.similarity("a", "b") == pytest.approx(1.0)
+        assert m.is_match("a", "b", 0.5) is True
+
+        m2 = SemanticMatcher()
+        m2._engine = _FakeEngine([0.0, 0.0])
+        assert m2.similarity("a", "b") == 0.0
+
+        class _Boom:
+            def encode(self, text): raise RuntimeError("no model")
+        m3 = SemanticMatcher()
+        m3._engine = _Boom()
+        assert m3.similarity("a", "b") is None
+        assert m3.is_match("a", "b", 0.5) is False
+
+    def test_matcher_import_missing_fails_closed(self):
+        """SemanticMatcher 不可用（import 失败）→ 语义订阅永不命中但不崩。"""
+        import openllm.iai.event_bus as eb_module
+        orig = eb_module.SemanticMatcher
+        eb_module.SemanticMatcher = None
+        try:
+            bus = EventBus(log_dir=Path(tempfile.mkdtemp()))
+            got = []
+            bus.subscribe(lambda e: got.append(e), semantic_filter="模型训练")
+            bus.publish(self._mk_event())
+            assert got == []
+        finally:
+            eb_module.SemanticMatcher = orig

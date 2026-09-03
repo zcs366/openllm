@@ -1,13 +1,23 @@
-"""event_bus.py — IAI 事件总线 (≤200行)
+"""event_bus.py — IAI 事件总线 (≤220行)
 
 内存 pub/sub + JSONL 持久化，让五体状态变化被连续感知。
 事件 Schema: {source, type, timestamp, entropy_score, payload}
 赫尔墨斯红线：任何体不得有终止对话的权限。
+
+语义路由（P0-2）：订阅者可声明 semantic_filter（兴趣自由文本），在精确
+字段过滤之上加 embedding 相关性判定。精确过滤器是硬门槛，语义是相关性
+层；无 semantic_filter 的订阅者行为与升级前完全一致（向后兼容）。
 """
 import json, logging, time, threading, uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+try:
+    from openllm.iai.event_semantic import SemanticMatcher, event_payload_to_text
+except ImportError:  # 语义引擎缺失不阻断总线（语义维度自动不可用）
+    SemanticMatcher = None  # type: ignore
+    def event_payload_to_text(payload): return str(payload)  # type: ignore
 
 logger = logging.getLogger("openllm.iai.event_bus")
 EVENT_LOG_DIR = Path.home() / ".openllm" / "events"
@@ -37,14 +47,17 @@ class Event:
 
 @dataclass
 class Subscriber:
-    """订阅者，支持 source/type/brain_id 三维过滤。"""
+    """订阅者：精确三维过滤（source/type/brain_id）+ 可选语义兴趣层。"""
     subscriber_id: str; callback: Callable[[Event], None]
     source_filter: Optional[str] = None; type_filter: Optional[str] = None
     brain_id_filter: Optional[str] = None  # None=听全部（协作监听），指定=只听该头脑
+    semantic_filter: Optional[str] = None  # 语义兴趣（自由文本）；None=纯精确订阅
+    semantic_threshold: float = 0.5        # embedding cosine 命中阈值
 
 class EventBus:
     """发布/订阅事件总线。内存分发 + JSONL 持久化。"""
-    def __init__(self, log_dir: Optional[Path] = None, ttl_hours: int = EVENT_TTL_HOURS):
+    def __init__(self, log_dir: Optional[Path] = None, ttl_hours: int = EVENT_TTL_HOURS,
+                 semantic_matcher: Any = None):
         self._subs: dict[str, Subscriber] = {}
         self._history: list[dict] = []
         self._lock = threading.Lock()
@@ -52,15 +65,21 @@ class EventBus:
         self._ttl_sec = ttl_hours * 3600
         self._log_dir.mkdir(parents=True, exist_ok=True)
         self._log_file = self._log_dir / "events.jsonl"
+        # 语义匹配器：可注入（测试用 stub）；None 则惰性建默认 SemanticMatcher
+        self._semantic = semantic_matcher
 
     def subscribe(self, cb: Callable[[Event], None],
                   source_filter: Optional[str] = None,
                   type_filter: Optional[str] = None,
-                  brain_id: Optional[str] = None) -> str:
-        """注册订阅者。brain_id=None 表示听全部（协作监听），指定值=只听该头脑。"""
+                  brain_id: Optional[str] = None,
+                  semantic_filter: Optional[str] = None,
+                  semantic_threshold: float = 0.5) -> str:
+        """注册订阅者。brain_id=None 表示听全部（协作监听），指定值=只听该头脑。
+        semantic_filter=自由文本兴趣；给定时在精确过滤之上做 embedding 相关性判定。"""
         sid = f"sub-{uuid.uuid4().hex[:8]}"
         with self._lock:
-            self._subs[sid] = Subscriber(sid, cb, source_filter, type_filter, brain_id)
+            self._subs[sid] = Subscriber(sid, cb, source_filter, type_filter, brain_id,
+                                         semantic_filter, semantic_threshold)
         return sid
 
     def unsubscribe(self, sid: str) -> bool:
@@ -86,7 +105,25 @@ class EventBus:
         if sub.type_filter and sub.type_filter != event.type: return False
         # brain_id 过滤：None=听全部（协作监听），指定=只匹配该头脑
         if sub.brain_id_filter is not None and sub.brain_id_filter != event.brain_id: return False
+        # 语义维度：给了兴趣则须语义命中；未给=纯精确订阅（原行为不变）
+        if sub.semantic_filter:
+            return self._semantic_hit(sub, event)
         return True
+
+    def _semantic_hit(self, sub: Subscriber, event: Event) -> bool:
+        """语义相关性判定。任何异常按不命中处理——语义是增强不是门禁。"""
+        try:
+            if self._semantic is None:
+                if SemanticMatcher is None:  # 引擎 import 失败=语义维度不可用
+                    return False
+                self._semantic = SemanticMatcher()
+            text = event_payload_to_text(event.payload)
+            interest = sub.semantic_filter or ""  # _match 已保证非空，此处仅供类型收窄
+            return bool(self._semantic.is_match(interest, text,
+                                                sub.semantic_threshold))
+        except Exception as exc:
+            logger.warning(f"[event_bus] 语义判定异常，按不命中处理: {exc}")
+            return False
 
     def get_history(self, source_filter: Optional[str] = None,
                     type_filter: Optional[str] = None, limit: int = 100) -> list[dict]:
