@@ -10,6 +10,7 @@ plan → act → observe → reflect
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Callable, Optional
+import json
 import time
 
 from .router import RuleRouter, RoutingContext, PhaseAction, create_router
@@ -69,6 +70,29 @@ class AgentLoop:
     on_plan: Optional[Callable] = None
     on_reflect: Optional[Callable] = None
     on_state_change: Optional[Callable] = None
+
+    def __post_init__(self):
+        """P0-3(2026-09-03): 默认反思落盘——动后反思从临时字符串变持久化文件.
+        记忆层回流第一段: reflection → ~/.openllm/output/reflections.jsonl."""
+        if self.on_reflect is None:
+            self.on_reflect = self._default_reflect
+
+    def _default_reflect(self, ctx: TurnContext) -> str:
+        """默认反思处理器: 反思内容追加到 reflections.jsonl(append-only)."""
+        text = (ctx.reflection or '').strip()
+        if not text:
+            text = f"[REFLECT] 第{self.turn_count}轮无实质反思(阶段={ctx.phase.name})"
+        try:
+            from pathlib import Path
+            p = Path.home() / '.openllm' / 'output' / 'reflections.jsonl'
+            p.parent.mkdir(parents=True, exist_ok=True)
+            entry = {"ts": time.time(), "turn": self.turn_count,
+                     "phase": ctx.phase.name, "reflection": text[:800]}
+            with open(p, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+        except Exception:
+            pass  # 落盘失败不阻断循环
+        return text
 
     def wake(self, identity: dict, memory: dict) -> "AgentLoop":
         """苏醒：加载身份和记忆。"""
