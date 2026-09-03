@@ -62,6 +62,8 @@ class Metacognition:
         self._retrieval_events: List[RetrievalEvent] = []
         self._mis_kills: List[dict] = []  # 误杀记录
         self._domain_coverage: Dict[str, int] = {}  # 领域→记忆数
+        self._semantic_coverage: Dict[str, int] = {}  # P2-2: 语义域→素材数
+        self._sem_domains: Optional[List[str]] = None  # P2-2: 已知语义域清单
         
         self._load_state()
     
@@ -73,6 +75,8 @@ class Metacognition:
                 data = json.loads(state_path.read_text(encoding="utf-8"))
                 self._domain_coverage = data.get("domain_coverage", {})
                 self._mis_kills = data.get("mis_kills", [])
+                self._semantic_coverage = data.get("semantic_coverage", {})
+                self._sem_domains = data.get("sem_domains")
             except Exception:
                 pass
     
@@ -81,6 +85,8 @@ class Metacognition:
         state_path = self.store_dir / "metacognition_state.json"
         state_path.write_text(json.dumps({
             "domain_coverage": self._domain_coverage,
+            "semantic_coverage": self._semantic_coverage,
+            "sem_domains": self._sem_domains,
             "mis_kills": self._mis_kills[-100:],  # 只保留最近100条
             "last_updated": time.time(),
         }, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -133,7 +139,80 @@ class Metacognition:
     def get_domain_coverage(self) -> dict:
         """获取领域覆盖度"""
         return dict(self._domain_coverage)
-    
+
+    def get_uncovered_domains(self, min_coverage: int = 3,
+                              known_domains: Optional[List[str]] = None) -> List[str]:
+        """
+        空白探测引擎 (P2-2 创造引擎#1, 2026-09-03) —— 渴求信号.
+
+        把 _domain_coverage 从"按检索源计数"升级为"语义域拓扑":
+        对已知语义域列表, 计算各域的记忆覆盖(检索事件计数 + jiak/corpus 素材),
+        返回覆盖薄弱(< min_coverage)的域 = 该知未知的空白 = 创造欲的靶子.
+
+        与纠错范式的关系(七神二启裁决一): 纠错=分布内下降, 创造=分布边缘扩展;
+        空白域就是分布边缘——探测到它, 才有"发明该问的问题"的起点.
+
+        Args:
+            min_coverage: 覆盖阈值, 低于此视为空白
+            known_domains: 已知语义域清单(缺省从状态/素材自动推断)
+        Returns:
+            未覆盖/低覆盖域名列表(按缺口排序)
+        """
+        # 1. 汇聚记忆域覆盖(兼容旧字段: 检索源计数+素材域)
+        cov: Dict[str, int] = dict(self._domain_coverage)
+        # 补: 素材域(jiak 卡 tags/corpus domain)——若状态里有 semantic_coverage 用它
+        sem = getattr(self, "_semantic_coverage", None)
+        if sem:
+            for k, v in sem.items():
+                cov[k] = cov.get(k, 0) + v
+
+        if not known_domains:
+            known_domains = self._infer_domains()
+
+        # 2. 对每个已知域算缺口
+        gaps = []
+        for d in known_domains:
+            got = sum(v for k, v in cov.items()
+                      if d.lower() in k.lower() or k.lower() in d.lower())
+            if got < min_coverage:
+                gaps.append((d, got))
+        # 3. 按缺口升序(最缺的在前)
+        gaps.sort(key=lambda x: x[1])
+        return [d for d, _ in gaps]
+
+    def _infer_domains(self) -> List[str]:
+        """从状态与素材目录推断系统'应该知道'的语义域."""
+        # 检索源本身是弱信号; 强信号来自 metacognition_state 的 sem_domains 字段
+        sem = getattr(self, "_sem_domains", None)
+        if sem:
+            return sem
+        # 缺省域(基于 openLLM 主场景)
+        defaults = ["openllm", "ilm", "agent", "记忆", "训练", "写作", "安全", "教育"]
+        cov = dict(self._domain_coverage)
+        for k in cov:
+            if k not in defaults and len(k) < 20:
+                defaults.append(k)
+        return defaults
+
+    def record_semantic_coverage(self, domain: str, count: int = 1):
+        """记录语义域素材覆盖(jiak/corpus 素材入账)——空白账本的收入侧.
+
+        供 intel_ingest/jiak 写卡方调用: 每篇成品入库存入其 domain 计数,
+        让 get_uncovered_domains 知道"素材已覆盖哪些域"."""
+        if not hasattr(self, "_semantic_coverage") or self._semantic_coverage is None:
+            self._semantic_coverage = {}
+        self._semantic_coverage[domain] = self._semantic_coverage.get(domain, 0) + count
+        # 持久化到状态(兼容旧字段)
+        try:
+            state_path = self.store_dir / "metacognition_state.json"
+            data = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+            sc = data.get("semantic_coverage", {})
+            sc[domain] = sc.get(domain, 0) + count
+            data["semantic_coverage"] = sc
+            state_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"record_semantic_coverage persist failed: {e}")
+
     def get_mis_kill_rate(self) -> float:
         """获取误杀率"""
         total = len(self._mis_kills)
