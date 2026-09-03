@@ -7,11 +7,13 @@
 from openllm.iai.event_bus import (
     EventBus, Event, Subscriber, BaseEventEmitter, SignalBridge,
 )
+from openllm.iai.session import SessionManager, AgentSession, SessionStatus
 from openllm.iai.prediction import PredictionEngine
 from openllm.iai.brain import BrainRegistry, BrainActivator, BRAIN_VOCAB
 
 __all__ = [
     "EventBus", "Event", "Subscriber", "BaseEventEmitter", "SignalBridge",
+    "SessionManager", "AgentSession", "SessionStatus",
     "PredictionEngine",
     "BrainRegistry", "BrainActivator", "BRAIN_VOCAB",
 ]
