@@ -206,6 +206,69 @@ class TestFailSafe:
         assert "异常降级" in v.reason
 
 
+# ── L2 打扰治理（v1：预算 + 振荡护栏）──
+
+class TestDisruptionGovernance:
+    """打扰预算 + 振荡护栏——只作用于打扰型 wake/pulse，正常 comm 不误伤。"""
+
+    def _wake(self, from_="A", to_="B", body="想到你"):
+        return make_req(from_=from_, to_=to_, msg_type="wake", body=body)
+
+    def test_daily_budget_enforced(self, tmp_path):
+        """B 日预算 2：跨发送方合计，第 3 次打扰型 BLOCK。"""
+        adj = make_adjudicator(tmp_path)
+        adj.set_daily_budget("B", 2)
+        assert adj.decide(self._wake(from_="A")).action == "PASS"
+        assert adj.decide(self._wake(from_="C")).action == "PASS"  # 另一发送方也占 B 预算
+        v = adj.decide(self._wake(from_="A"))
+        assert v.action == "BLOCK"
+        assert "打扰预算" in v.reason
+
+    def test_budget_resets_next_day(self, tmp_path):
+        """跨日重置：推进一天后预算恢复。"""
+        clock = Clock()
+        adj = make_adjudicator(tmp_path, clock=clock)
+        adj.set_daily_budget("B", 1)
+        assert adj.decide(self._wake()).action == "PASS"
+        assert adj.decide(self._wake()).action == "BLOCK"
+        clock.advance(86400)  # 次日
+        assert adj.decide(self._wake()).action == "PASS"
+
+    def test_non_disruptive_not_counted(self, tmp_path):
+        """正常 comm.ask 不占打扰预算（预算=1 时 ask 可多次）。"""
+        adj = make_adjudicator(tmp_path)
+        adj.set_daily_budget("B", 1)
+        for _ in range(3):
+            assert adj.decide(make_req(msg_type="comm.ask")).action == "PASS"
+
+    def test_oscillation_guard(self, tmp_path):
+        """打扰型互唤：A→B、B→A 成对后，第 3 次方向 BLOCK（振荡冷却）。"""
+        clock = Clock()
+        adj = make_adjudicator(tmp_path, clock=clock)
+        assert adj.decide(self._wake(from_="A", to_="B")).action == "PASS"
+        assert adj.decide(self._wake(from_="B", to_="A")).action == "PASS"  # 成对互唤完成
+        v = adj.decide(self._wake(from_="A", to_="B"))  # 再唤醒 → 振荡
+        assert v.action == "BLOCK"
+        assert "振荡" in v.reason
+
+    def test_oscillation_not_apply_to_comm(self, tmp_path):
+        """正常 comm.ask/reply 双向通信不受振荡护栏影响。"""
+        adj = make_adjudicator(tmp_path)
+        assert adj.decide(make_req(from_="A", to_="B", msg_type="comm.ask")).action == "PASS"
+        assert adj.decide(make_req(from_="B", to_="A", msg_type="comm.reply")).action == "PASS"
+        assert adj.decide(make_req(from_="A", to_="B", msg_type="comm.ask")).action == "PASS"
+
+    def test_oscillation_window_expiry(self, tmp_path):
+        """窗口滑过后互唤记录过期 → 振荡解除。"""
+        clock = Clock()
+        adj = make_adjudicator(tmp_path, clock=clock, osc_window_sec=60)
+        assert adj.decide(self._wake(from_="A", to_="B")).action == "PASS"
+        assert adj.decide(self._wake(from_="B", to_="A")).action == "PASS"
+        assert adj.decide(self._wake(from_="A", to_="B")).action == "BLOCK"
+        clock.advance(61)
+        assert adj.decide(self._wake(from_="A", to_="B")).action == "PASS"
+
+
 # ── 审计 ──
 
 class TestAudit:

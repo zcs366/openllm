@@ -45,6 +45,15 @@ SECRET_PATTERNS = [
     re.compile(r"(api[_-]?key|secret|token|password)\s*[:=]\s*\S{8,}", re.I),
 ]
 
+# L2 · 打扰型消息类型（wake/pulse/vibration 等非任务唤醒）——
+# 打扰预算与振荡护栏只作用于这类（正常 comm.ask/reply 不误伤）
+_DISRUPTIVE_HINTS = ("wake", "pulse", "vibration", "comm.wake", "comm.pulse")
+
+
+def _is_disruptive(msg_type: str) -> bool:
+    t = msg_type.lower()
+    return any(h in t for h in _DISRUPTIVE_HINTS)
+
 
 # ═══════════════════════════════════════════════════════════════════
 # 数据模型
@@ -140,6 +149,7 @@ class TransmissionAdjudicator:
         rate_limit: int = 10,                # L0 频控硬顶（窗口内次数）
         rate_window_sec: float = 60.0,
         min_interval_sec: Optional[float] = None,   # L1 冷却期（None=关闭）
+        osc_window_sec: float = 120.0,      # L2 振荡护栏窗口（打扰型互唤）
         now: Optional[Callable[[], float]] = None,  # 时钟注入（测试）
     ) -> None:
         self._log_dir = log_dir or DEFAULT_LOG_DIR
@@ -152,11 +162,16 @@ class TransmissionAdjudicator:
         self._rate_limit = rate_limit
         self._rate_window = rate_window_sec
         self._min_interval = min_interval_sec
+        self._osc_window = osc_window_sec
         self._now = now or time.time
         self._rate = _RateTracker(rate_window_sec)
         self._last_pass: dict[tuple, float] = {}
         self._blocked_pairs: set[tuple[str, str]] = set()
         self._extra_rules: list[PolicyRule] = []
+        # L2 打扰治理（v1）：预算 + 振荡护栏
+        self._daily_budget: dict[str, int] = {}            # to_agent → 日额度
+        self._budget_used: dict[tuple[str, str], int] = {}  # (to, YYYY-MM-DD) → 已用
+        self._pass_pairs: dict[tuple, deque] = defaultdict(deque)  # (from,to) → 最近 PASS 时间戳
 
     # -- 规则注册 ---------------------------------------------------------
 
@@ -167,6 +182,10 @@ class TransmissionAdjudicator:
     def block_pair(self, from_agent: str, to_agent: str) -> None:
         """黑名单：禁止某对 (from,to) 传输。to_agent 传 "*" 表示禁止该发起方所有外传。"""
         self._blocked_pairs.add((from_agent, to_agent))
+
+    def set_daily_budget(self, recipient: str, daily_limit: int) -> None:
+        """L2 打扰预算：recipient 每日最多接收的打扰型唤醒次数（跨发送方合计）。"""
+        self._daily_budget[recipient] = max(0, daily_limit)
 
     # -- 主入口 -----------------------------------------------------------
 
@@ -184,10 +203,20 @@ class TransmissionAdjudicator:
                 self._audit(req, v)
                 return v
 
+            # ── L2 打扰治理（仅打扰型 wake/pulse）：预算 + 振荡 ──
+            if _is_disruptive(req.msg_type):
+                l2_reason = self._check_disruption(req, key, now)
+                if l2_reason:
+                    v = Verdict(action="BLOCK", reason=l2_reason,
+                                policy_hits=[l2_reason], score=0.0)
+                    self._audit(req, v)
+                    return v
+
             # ── L1 信号层：软评分 ──
             score = self._score(req, key, now)
             if score >= self._threshold:
                 self._last_pass[key] = now
+                self._record_pass(req, key, now)
                 v = Verdict(action="PASS",
                             reason=f"L1 评分 {score:.2f} ≥ 阈值 {self._threshold:.2f}",
                             score=score)
@@ -230,6 +259,41 @@ class TransmissionAdjudicator:
             if reason:
                 return f"[{rule.rule_id}] {reason}"
         return None
+
+    # -- L2 打扰治理（打扰型 wake/pulse 专用）-----------------------------
+
+    def _check_disruption(self, req: TransmissionRequest, key: tuple, now: float) -> Optional[str]:
+        """预算超限或振荡互唤 → 返回 BLOCK 理由。只作用于打扰型消息。"""
+        to = req.to_agent or "*"
+        # 打扰预算：recipient 日总额（跨发送方合计）
+        limit = self._daily_budget.get(to)
+        if limit:
+            day = time.strftime("%Y-%m-%d", time.localtime(now))
+            used = self._budget_used.get((to, day), 0)
+            if used >= limit:
+                return f"打扰预算用尽: {to} 今日 {used}/{limit}"
+        # 振荡护栏：窗口内双向打扰型互唤已成对 → 冷却（防共振回路）
+        rev = (req.to_agent or "*", req.from_agent)
+        cutoff = now - self._osc_window
+        for k in (key, rev):
+            dq = self._pass_pairs.get(k)
+            while dq and dq[0] < cutoff:
+                dq.popleft()
+        if (len(self._pass_pairs.get(key, [])) >= 1
+                and len(self._pass_pairs.get(rev, [])) >= 1):
+            return (f"振荡护栏: {req.from_agent}↔{req.to_agent or '*'} "
+                    f"打扰型互唤过热（窗口 {self._osc_window:.0f}s）")
+        return None
+
+    def _record_pass(self, req: TransmissionRequest, key: tuple, now: float) -> None:
+        """PASS 记录（仅打扰型）：预算消费 + 互唤对时间戳。"""
+        if not _is_disruptive(req.msg_type):
+            return
+        to = req.to_agent or "*"
+        if self._daily_budget.get(to):
+            day = time.strftime("%Y-%m-%d", time.localtime(now))
+            self._budget_used[(to, day)] = self._budget_used.get((to, day), 0) + 1
+        self._pass_pairs[key].append(now)
 
     # -- L1 软评分 --------------------------------------------------------
 
