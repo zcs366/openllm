@@ -398,3 +398,100 @@ class TestRunPipeline:
         guard.run_pipeline()
         assert guard.state["rollback_count"] == 3
         assert len(guard.state["history"]) == 3
+
+
+class TestP0ATrueRollback:
+    """P0-A 真快照真回滚（BurnInGate 2026-09-06）：快照存文件实体，回滚真恢复。"""
+
+    def test_snapshot_copies_actual_files(self, guard, isolated):
+        """快照目录 files/ 下有实际文件副本（非仅校验和）。"""
+        _make_adapter_files(isolated["adapter_dir"])
+        snap = Path(guard.pre_train_snapshot())
+        files_dir = snap / "files"
+        assert files_dir.exists()
+        copies = list(files_dir.rglob("*"))
+        assert any(f.is_file() for f in copies)
+        # 内容一致
+        src = isolated["adapter_dir"] / "adapter_model.safetensors"
+        dst = files_dir / "adapter_model.safetensors"
+        assert dst.exists()
+        assert dst.read_text() == src.read_text()
+        # manifest 标记 full_copy
+        manifest = json.loads((snap / "snapshot.json").read_text())
+        assert manifest["snapshot_mode"] == "full_copy"
+
+    def test_rollback_restores_corrupted_file(self, guard, isolated):
+        """核心场景：训练改坏 adapter 文件 → 回滚 → 内容真恢复。"""
+        _make_adapter_files(isolated["adapter_dir"])
+        target = isolated["adapter_dir"] / "adapter_model.safetensors"
+        original = target.read_text()
+        guard.pre_train_snapshot()
+        # 模拟训练写坏了权重文件
+        target.write_text("CORRUPTED_BY_TRAINING")
+        assert target.read_text() != original
+        # 回滚必须真恢复
+        assert guard.auto_rollback() is True
+        assert target.read_text() == original
+        assert guard.state["status"] == "rolled_back"
+
+    def test_rollback_restores_deleted_file(self, guard, isolated):
+        """训练删了文件 → 回滚恢复。"""
+        _make_adapter_files(isolated["adapter_dir"])
+        target = isolated["adapter_dir"] / "adapter_config.json"
+        original = target.read_text()
+        guard.pre_train_snapshot()
+        target.unlink()
+        assert not target.exists()
+        assert guard.auto_rollback() is True
+        assert target.exists()
+        assert target.read_text() == original
+
+    def test_snapshot_excludes_checkpoints(self, guard, isolated):
+        """checkpoint-* 中间态（247MB/个）不进快照。"""
+        _make_adapter_files(isolated["adapter_dir"])
+        ckpt = isolated["adapter_dir"] / "checkpoint-900"
+        ckpt.mkdir()
+        (ckpt / "model.safetensors").write_text("huge_intermediate")
+        snap = Path(guard.pre_train_snapshot())
+        manifest = json.loads((snap / "snapshot.json").read_text())
+        assert not any("checkpoint-" in rel for rel in manifest["files"])
+        # 副本目录也没有
+        assert not list((snap / "files").rglob("*checkpoint*"))
+
+    def test_rollback_preserves_checkpoints(self, guard, isolated):
+        """回滚不误删 checkpoint-* 训练中间态。"""
+        _make_adapter_files(isolated["adapter_dir"])
+        ckpt = isolated["adapter_dir"] / "checkpoint-900"
+        ckpt.mkdir()
+        ckpt_file = ckpt / "model.safetensors"
+        ckpt_file.write_text("intermediate")
+        guard.pre_train_snapshot()
+        (isolated["adapter_dir"] / "adapter_model.safetensors").write_text("BAD")
+        assert guard.auto_rollback() is True
+        assert ckpt_file.exists() and ckpt_file.read_text() == "intermediate"
+
+    def test_rotation_keeps_n_snapshots(self, guard, isolated):
+        """快照轮转：超过 KEEP_SUCCESS 删最旧。"""
+        _make_adapter_files(isolated["adapter_dir"])
+        guard.KEEP_SUCCESS = 3
+        import time as _t
+        created = []
+        for i in range(5):
+            s = guard.pre_train_snapshot()
+            created.append(Path(s).name)
+            _t.sleep(1.05)  # 时间戳秒级去重
+        remaining = sorted(d.name for d in isolated["snapshot_root"].iterdir() if d.is_dir())
+        assert len(remaining) == 3
+        assert remaining == sorted(created[-3:])  # 保留最新3个
+
+    def test_old_checksum_only_snapshot_degrades_honestly(self, guard, isolated):
+        """旧式快照（无files/副本）+文件不匹配 → False（诚实降级不假装成功）。"""
+        _make_adapter_files(isolated["adapter_dir"])
+        snap = Path(guard.pre_train_snapshot())
+        # 人为移除 files/ 模拟旧快照
+        import shutil as _sh
+        _sh.rmtree(snap / "files")
+        (isolated["adapter_dir"] / "adapter_model.safetensors").write_text("CHANGED")
+        assert guard.auto_rollback() is False
+        assert guard.state["status"] == "rollback_partial"
+        assert guard.state.get("last_failed_snapshot")  # 失败快照被标记保护

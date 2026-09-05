@@ -97,11 +97,14 @@ def _now_iso() -> str:
 # ═══ 公开 API ═══
 
 
-def log_viability(log_path: Optional[Path] = None) -> Optional[dict]:
+def log_viability(log_path: Optional[Path] = None, bus: Any = "auto") -> Optional[dict]:
     """调用 io-s 的 compute_viability()，将结果追加写入 V 值日志。
 
     Args:
         log_path: 日志文件路径覆盖（测试用），为 None 时用默认 VIABILITY_LOG。
+        bus: 进化总线接线（T3 P0-C）。"auto"=生产（自建真实总线）；
+             None=不接总线（测试隔离，防污染 ~/.openllm/evolution）；
+             传入实例=用注入的总线（测试可传mock/临时总线）。
 
     Returns:
         写入的记录 dict，含 timestamp、source、V值及分量；失败返回 None。
@@ -138,6 +141,32 @@ def log_viability(log_path: Optional[Path] = None) -> Optional[dict]:
     except Exception as exc:
         logger.warning(f"写入V值日志失败: {exc}")
         return None
+    # ── T3（BurnInGate P0-C, 2026-09-06）：V值并入进化总线，拆断头管 ──
+    # bus.py 声明 viability.update 类型已久但无生产者=断头管重演中。
+    # BurnInGate 注册为消费者（"谁读它读完触发什么"闭环：V值→门禁判定）。
+    # 降级铁律：总线故障静默，不阻塞V值日志主流程。
+    if bus is not None:
+        try:
+            if bus == "auto":
+                from openllm.evolution.bus import EvolutionBus
+                bus_obj = EvolutionBus()
+            else:
+                bus_obj = bus
+            from openllm.evolution.bus import DigestEvent
+            bus_obj.registry.register("viability.update", "burnin_gate")
+            v_result = record.get("v_result", {})
+            bus_obj.append(DigestEvent(
+                type="viability.update",
+                producer="viability_logger",
+                payload={
+                    "V": v_result.get("V"),
+                    "components": v_result.get("components"),
+                    "missing": v_result.get("missing"),
+                    "timestamp": record.get("timestamp"),
+                },
+            ), warn_unconsumed=False)
+        except Exception as exc:
+            logger.debug(f"V值总线事件降级静默: {exc}")
     return record
 
 

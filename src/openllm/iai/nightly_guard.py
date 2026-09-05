@@ -17,6 +17,7 @@
 import hashlib
 import json
 import logging
+import os
 import shutil
 import time
 from pathlib import Path
@@ -123,8 +124,41 @@ class NightlyGuard:
 
     # ── 1. 训练前快照 ──────────────────────────────────────
 
+    # 快照排除模式：训练中间态 checkpoint-* 子目录（每个247MB，可从adapter再生，
+    # 不是部署单元）。只快照顶层部署文件（~93MB：adapter_model.safetensors等）。
+    # BurnInGate P0-A（2026-09-06七神终裁）：假回滚修复——快照必须存实际文件，
+    # 只存校验和的"轻量方案"在训练改动adapter后回滚必然失败（rollback_partial）。
+    SNAPSHOT_EXCLUDE_DIRS = ("checkpoint-",)
+
+    def _snapshot_files(self) -> Dict[str, str]:
+        """复制 adapter 顶层部署文件到快照目录，返回 {rel: sha256} 清单。
+
+        排除 checkpoint-* 中间态子目录。写入用 tmp+rename 原子模式。
+        """
+        snap_path = Path(self._state["snapshot"])
+        files_dir = snap_path / "files"
+        files_dir.mkdir(parents=True, exist_ok=True)
+
+        manifest: Dict[str, str] = {}
+        if self._adapter_dir.exists():
+            for fpath in sorted(self._adapter_dir.rglob("*")):
+                if not fpath.is_file():
+                    continue
+                rel = str(fpath.relative_to(self._adapter_dir))
+                # 排除训练中间态（checkpoint-*/...）
+                if any(part.startswith(self.SNAPSHOT_EXCLUDE_DIRS) for part in Path(rel).parts):
+                    continue
+                dst = files_dir / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                # 原子复制：tmp → fsync → rename（赫淮斯托斯：防半快照被回滚）
+                tmp = dst.with_suffix(dst.suffix + ".tmp")
+                shutil.copy2(fpath, tmp)
+                os.replace(tmp, dst)
+                manifest[rel] = _file_checksum(fpath)
+        return manifest
+
     def pre_train_snapshot(self) -> str:
-        """训练前快照：记录 adapter 目录文件校验和清单。
+        """训练前快照：复制 adapter 部署文件实体 + 校验和清单。
 
         Returns:
             快照目录路径字符串
@@ -133,13 +167,9 @@ class NightlyGuard:
         snap_dir = self._snapshot_root / ts
         snap_dir.mkdir(parents=True, exist_ok=True)
 
-        manifest: Dict[str, str] = {}
-
-        if self._adapter_dir.exists():
-            for fpath in self._adapter_dir.rglob("*"):
-                if fpath.is_file():
-                    rel = str(fpath.relative_to(self._adapter_dir))
-                    manifest[rel] = _file_checksum(fpath)
+        self._state["snapshot"] = str(snap_dir)
+        # 先落 state 再复制（_snapshot_files 读 state["snapshot"]）
+        manifest = self._snapshot_files()
 
         manifest_path = snap_dir / "snapshot.json"
         try:
@@ -150,23 +180,53 @@ class NightlyGuard:
                         "adapter_dir": str(self._adapter_dir),
                         "files": manifest,
                         "file_count": len(manifest),
+                        "snapshot_mode": "full_copy",  # P0-A: 区别于旧 checksum_only
                     },
                     f,
                     ensure_ascii=False,
                     indent=2,
                 )
         except Exception as e:
-            logger.error("[nightly_guard] 快照写入失败: %s", e)
+            logger.error("[nightly_guard] 快照清单写入失败: %s", e)
 
-        self._state["snapshot"] = str(snap_dir)
+        self._rotate_snapshots()
         self._save_state()
 
         logger.info(
-            "[nightly_guard] 快照完成: %s (%d 文件)",
+            "[nightly_guard] 快照完成（实体复制）: %s (%d 文件)",
             snap_dir,
             len(manifest),
         )
         return str(snap_dir)
+
+    # 保留轮转：N=7 成功 + 1 失败（赫淮斯托斯/雅典娜裁）。失败快照由
+    # state["last_failed_snapshot"] 标记保护，供 P0-D 审计。
+    KEEP_SUCCESS = 7
+    KEEP_FAILED = 1
+
+    def _rotate_snapshots(self) -> None:
+        """按时间删最旧快照，保留最近 KEEP_SUCCESS 个 + 最近 KEEP_FAILED 个失败快照。"""
+        try:
+            snaps = sorted(
+                (d for d in self._snapshot_root.iterdir() if d.is_dir()),
+                key=lambda d: d.name,  # YYYYmmdd_HHMMSS 字典序=时间序
+                reverse=True,
+            )
+            protected = set()
+            last_failed = self._state.get("last_failed_snapshot")
+            if last_failed:
+                protected.add(Path(last_failed).name)
+            kept = 0
+            for d in snaps:
+                if d.name in protected:
+                    continue
+                if kept < self.KEEP_SUCCESS:
+                    kept += 1
+                    continue
+                shutil.rmtree(d, ignore_errors=True)
+                logger.info("[nightly_guard] 轮转删除旧快照: %s", d.name)
+        except Exception as e:
+            logger.warning("[nightly_guard] 快照轮转失败（不阻塞）: %s", e)
 
     # ── 2. 验证 ────────────────────────────────────────────
 
@@ -269,20 +329,50 @@ class NightlyGuard:
             # 确保目标目录存在
             adapter.mkdir(parents=True, exist_ok=True)
 
-            # 删除 adapter 目录中不在快照里的文件（清理训练残留）
+            # 删除 adapter 目录中不在快照里的文件（清理训练残留；排除checkpoint中间态）
             if adapter.exists():
                 for fpath in adapter.rglob("*"):
                     if fpath.is_file():
                         rel = str(fpath.relative_to(adapter))
+                        if any(part.startswith(self.SNAPSHOT_EXCLUDE_DIRS) for part in Path(rel).parts):
+                            continue
                         if rel not in snap_files:
                             fpath.unlink()
                             logger.info("[nightly_guard] 删除残留文件: %s", rel)
 
-            # 恢复文件：如果快照中文件存在且校验和匹配，说明训练未修改（跳过）
-            # 如果校验和不匹配或文件缺失，需要从快照恢复
-            # 注意：快照只存了校验和，没存文件内容——这是轻量方案
-            # 恢复策略：如果 adapter 目录存在且文件校验和匹配快照，认为回滚成功
-            # 如果不匹配，标记需要人工干预
+            files_dir = Path(snap_path) / "files"
+            if files_dir.exists() and any(files_dir.rglob("*")):
+                # ── P0-A 真恢复：从快照副本复制回来（2026-09-06 BurnInGate）──
+                for rel, expected_hash in snap_files.items():
+                    src = files_dir / rel
+                    dst = adapter / rel
+                    if not src.exists():
+                        logger.error("[nightly_guard] 快照副本缺失: %s", rel)
+                        self._mark_rollback_failed()
+                        return False
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = dst.with_suffix(dst.suffix + ".tmp")
+                    shutil.copy2(src, tmp)
+                    os.replace(tmp, dst)
+                # 恢复后校验和验证
+                mismatches = []
+                for rel, expected_hash in snap_files.items():
+                    if _file_checksum(adapter / rel) != expected_hash:
+                        mismatches.append(rel)
+                if mismatches:
+                    logger.error(
+                        "[nightly_guard] 恢复后校验和不匹配 %d 个: %s",
+                        len(mismatches), mismatches[:5],
+                    )
+                    self._mark_rollback_failed()
+                    return False
+                self._state["rollback_count"] += 1
+                self._state["status"] = "rolled_back"
+                self._save_state()
+                logger.info("[nightly_guard] 回滚成功 ✓（实体恢复+校验通过）")
+                return True
+
+            # ── 旧快照（checksum_only，无文件副本）：只能验证无法恢复 ──
             mismatches = []
             for rel, expected_hash in snap_files.items():
                 fpath = adapter / rel
@@ -295,25 +385,31 @@ class NightlyGuard:
 
             if mismatches:
                 logger.warning(
-                    "[nightly_guard] %d 个文件与快照不匹配: %s",
+                    "[nightly_guard] 旧式快照无副本，%d 个文件不匹配且无法恢复: %s",
                     len(mismatches),
                     mismatches[:5],
                 )
-                self._state["rollback_count"] += 1
-                self._state["status"] = "rollback_partial"
-                self._save_state()
+                self._mark_rollback_failed()
                 return False
 
             self._state["rollback_count"] += 1
             self._state["status"] = "rolled_back"
             self._save_state()
 
-            logger.info("[nightly_guard] 回滚成功 ✓")
+            logger.info("[nightly_guard] 回滚成功 ✓（校验和一致，无需恢复）")
             return True
 
         except Exception as e:
             logger.error("[nightly_guard] 回滚异常: %s", e)
             return False
+
+    def _mark_rollback_failed(self) -> None:
+        """记录回滚失败+保护当前失败快照（供P0-D审计，KEEP_FAILED=1）。"""
+        self._state["rollback_count"] += 1
+        self._state["status"] = "rollback_partial"
+        if self._state.get("snapshot"):
+            self._state["last_failed_snapshot"] = self._state["snapshot"]
+        self._save_state()
 
     # ── 4. 完整管线 ────────────────────────────────────────
 

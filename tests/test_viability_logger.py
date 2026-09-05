@@ -56,7 +56,7 @@ class TestLogViability:
     )
     def test_writes_valid_jsonl(self, _mock_loader, v_log, tmp_path):
         """mock compute_viability → 写入后 read_log 能读回，含 timestamp 和 source。"""
-        record = log_viability(log_path=v_log)
+        record = log_viability(log_path=v_log, bus=None)
         assert record is not None
         assert "timestamp" in record
         assert record["source"] == "openllm.viability_logger"
@@ -77,7 +77,7 @@ class TestLogViability:
             return _raise
         mod._load_compute_viability = _broken
         try:
-            record = log_viability(log_path=v_log)
+            record = log_viability(log_path=v_log, bus=None)
         finally:
             mod._load_compute_viability = original
         assert record is None
@@ -90,7 +90,7 @@ class TestLogViability:
     )
     def test_io_s_not_importable_returns_none(self, _mock_none, v_log):
         """io-s 不可导入 → 返回 None。"""
-        record = log_viability(log_path=v_log)
+        record = log_viability(log_path=v_log, bus=None)
         assert record is None
 
     def test_compute_viability_returns_none_returns_none(self, v_log):
@@ -99,7 +99,7 @@ class TestLogViability:
             "openllm.memory.viability_logger._load_compute_viability",
             return_value=lambda weights=None: None,
         ):
-            record = log_viability(log_path=v_log)
+            record = log_viability(log_path=v_log, bus=None)
         assert record is not None
         assert record["v_result"] is None
 
@@ -109,8 +109,8 @@ class TestLogViability:
     )
     def test_append_only_multiple_writes(self, _mock_loader, v_log):
         """多次写入都是追加，不覆盖。"""
-        log_viability(log_path=v_log)
-        log_viability(log_path=v_log)
+        log_viability(log_path=v_log, bus=None)
+        log_viability(log_path=v_log, bus=None)
         rows = read_log(v_log, last_n=10)
         assert len(rows) == 2
         # 两条时间戳不同（至少秒级差异或相同均可）
@@ -249,7 +249,7 @@ class TestCLI:
     def test_cli_read_flag(self, _mock_loader, v_log, monkeypatch):
         """python -m --read 5 → 不报错。"""
         # 先写一条
-        log_viability(log_path=v_log)
+        log_viability(log_path=v_log, bus=None)
 
         result = subprocess.run(
             [
@@ -292,7 +292,7 @@ class TestAdaptiveWeights:
     )
     def test_adaptive_weights_recorded(self, _mock_w, _mock_cv, v_log):
         """mock read_current_weights 返回权重 → 记录含 weights_used。"""
-        record = log_viability(log_path=v_log)
+        record = log_viability(log_path=v_log, bus=None)
         assert record is not None
         assert "weights_used" in record
         assert record["weights_used"]["M"] == 0.35
@@ -308,7 +308,7 @@ class TestAdaptiveWeights:
     )
     def test_no_adaptive_weights_no_field(self, _mock_w, _mock_cv, v_log):
         """mock read_current_weights 返回 None → 记录无 weights_used 字段。"""
-        record = log_viability(log_path=v_log)
+        record = log_viability(log_path=v_log, bus=None)
         assert record is not None
         assert "weights_used" not in record
 
@@ -324,10 +324,64 @@ class TestAdaptiveWeights:
             raise RuntimeError("boom")
         mod._load_read_current_weights = _raise
         try:
-            record = log_viability(log_path=v_log)
+            record = log_viability(log_path=v_log, bus=None)
         finally:
             mod._load_read_current_weights = original
         # 应该仍然成功写入（异常被 try/except 捕获后走无权重路径）
         # 但 weights_used 不应出现
         if record is not None:
             assert "weights_used" not in record
+
+
+# ═══ T3: V值并入进化总线（BurnInGate P0-C, 2026-09-06）═══
+
+class TestViabilityBusIntegration:
+    """log_viability → bus.append(viability.update) 接线（拆断头管）。"""
+
+    def test_bus_event_appended(self, tmp_path):
+        """注入临时总线：V值日志后总线收到 viability.update 事件。"""
+        from openllm.evolution.bus import EvolutionBus
+        bus = EvolutionBus(store_dir=tmp_path / "bus")
+        v_log = tmp_path / "v.jsonl"
+        record = log_viability(log_path=v_log, bus=bus)
+        if record is None:
+            pytest.skip("io-s compute_viability 不可用")
+        events = bus.query(event_type="viability.update", days=1)
+        assert len(events) >= 1
+        ev = events[0]
+        assert ev["producer"] == "viability_logger"
+        assert "V" in ev["payload"]
+        assert "components" in ev["payload"]
+
+    def test_consumer_registered(self, tmp_path):
+        """BurnInGate 注册为 viability.update 消费者（谁读它闭环）。"""
+        from openllm.evolution.bus import EvolutionBus
+        bus = EvolutionBus(store_dir=tmp_path / "bus")
+        v_log = tmp_path / "v.jsonl"
+        record = log_viability(log_path=v_log, bus=bus)
+        if record is None:
+            pytest.skip("io-s compute_viability 不可用")
+        assert bus.registry.has_consumer("viability.update")
+        assert "burnin_gate" in bus.registry.consumers_for("viability.update")
+
+    def test_bus_none_no_side_effect(self, tmp_path):
+        """bus=None：不接总线（测试隔离），日志主流程不受影响。"""
+        v_log = tmp_path / "v.jsonl"
+        record = log_viability(log_path=v_log, bus=None)
+        if record is None:
+            pytest.skip("io-s compute_viability 不可用")
+        assert v_log.exists()
+
+    def test_bus_failure_degrades_silently(self, tmp_path):
+        """总线故障静默降级：不阻塞V值日志主流程。"""
+        class BrokenBus:
+            class registry:
+                @staticmethod
+                def register(*a, **k):
+                    raise RuntimeError("bus down")
+        v_log = tmp_path / "v.jsonl"
+        record = log_viability(log_path=v_log, bus=BrokenBus())
+        if record is None:
+            pytest.skip("io-s compute_viability 不可用")
+        assert record is not None  # 主流程未受总线故障影响
+        assert v_log.exists()

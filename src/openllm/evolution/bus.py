@@ -47,6 +47,8 @@ KNOWN_TYPES = {
     "stopline.evaluated",  # 停训线判定（第一个真实消费者产出）
     "drift.sample",        # 漂移仪表采样（P2-G shadow）
     "metabolic.sample",    # 代谢变量采样（P1-E）
+    "gate.passed",         # 权重通道门禁放行（BurnInGate P0，2026-09-06）
+    "gate.rejected",       # 权重通道门禁拒绝（含回滚状态；部署侧只认passed）
 }
 
 
