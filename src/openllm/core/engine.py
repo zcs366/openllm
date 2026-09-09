@@ -100,8 +100,12 @@ class OpenLLMEngine:
         self.memory = MemoryOS(Path(config.capsule_dir))
         self.security = SecurityFoundation(Path(config.capsule_dir))
         # 设置权限级别（0=PLAN, 1=READ_ONLY, 2=LOCAL_WRITE, 3=NETWORK, 4=ADMIN）
+        # env覆盖入口（2026-09-10鲁班加）：OPENLLM_SECURITY_LEVEL=3 启动即开网络工具，
+        # 免改代码。越级(>config值)允许——env由运维侧控制；降级(<config值)也允许。
         from ..security.gate import PermissionLevel
-        self.security.gate.current_level = PermissionLevel(config.security_level)
+        _env_level = os.environ.get("OPENLLM_SECURITY_LEVEL")
+        _level = int(_env_level) if _env_level and _env_level.isdigit() else config.security_level
+        self.security.gate.current_level = PermissionLevel(_level)
         self.tools = create_default_tools()
         
         # ISN Tool Registry Bridge（动态工具注册）
