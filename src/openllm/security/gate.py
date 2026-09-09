@@ -129,6 +129,18 @@ class PermissionGate:
         "api_call": PermissionLevel.NETWORK,
         "web_search": PermissionLevel.NETWORK,
         "hermes_search": PermissionLevel.NETWORK,
+        # L3 网络工具（自造降级链 2026-09-10 鲁班补）
+        "fcrawl": PermissionLevel.NETWORK,
+        "crawl4ai": PermissionLevel.NETWORK,
+        "curl_impersonate": PermissionLevel.NETWORK,
+        # L1 只读桥接工具——OCR/文档解析只读本地文件走HTTP（设计上无外发）
+        "ocr": PermissionLevel.READ_ONLY,
+        "doc_parser": PermissionLevel.READ_ONLY,
+        "octopus_search": PermissionLevel.READ_ONLY,
+        "octopus_self_model": PermissionLevel.READ_ONLY,
+        "octopus_search_stats": PermissionLevel.READ_ONLY,
+        "octopus_route": PermissionLevel.READ_ONLY,
+        "octopus_health": PermissionLevel.READ_ONLY,
         "send_message": PermissionLevel.NETWORK,
         "publish": PermissionLevel.NETWORK,
         # L4 管理模式

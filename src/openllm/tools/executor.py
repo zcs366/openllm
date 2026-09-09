@@ -582,4 +582,46 @@ def create_default_tools() -> ToolRegistry:
                               "description": "输出格式（默认markdown）"},
         }, "required": ["file_path"]})
 
+    # ── Fcrawl（HTTP级网页抓取——本地免费零API）────────────────────
+    from .fcrawl import handle as _fcrawl_handle
+    registry.register("fcrawl", _fcrawl_handle,
+        "Fcrawl网页爬虫引擎——本地免费零API Key。六大功能: scrape(单页→Markdown), crawl(整站BFS), map(URL发现), search(搜索+完整内容), batch(批量并行), agent(自然语言搜索+抓取)。反爬自动降级，BM25焦点提取。",
+        schema={"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["scrape","crawl","map","search","batch","agent","health"],
+                       "description": "功能: scrape=单页抓取, crawl=整站爬取, map=URL发现, search=搜索+内容, batch=批量, agent=自然语言搜索, health=健康检查"},
+            "url": {"type": "string", "description": "目标URL (scrape/crawl/map必填)"},
+            "urls": {"type": "array", "items": {"type": "string"}, "description": "URL列表 (batch必填)"},
+            "query": {"type": "string", "description": "搜索查询 (search必填)"},
+            "prompt": {"type": "string", "description": "自然语言任务 (agent必填)"},
+            "focus": {"type": "string", "description": "BM25焦点提取关键词"},
+            "format": {"type": "string", "enum": ["markdown","html","json"], "description": "输出格式"},
+            "limit": {"type": "integer", "description": "最大数量 (crawl默认50)"},
+            "depth": {"type": "integer", "description": "爬取深度 (crawl默认3)"},
+        }, "required": ["action"]})
+
+    # ── Crawl4AI（浏览器级抓取——JS渲染/SPA，subprocess桥接Hermes venv）─
+    from .crawl4ai import tool_crawl4ai
+    registry.register("crawl4ai", tool_crawl4ai,
+        "浏览器级网页抓取——Playwright驱动JS渲染+反爬，输出LLM原生Markdown。适用SPA/动态加载/无限滚动页面。降级链: crawl4ai(JS渲染) → fcrawl(HTTP级)。",
+        schema={"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["scrape","batch","deep_crawl","extract"],
+                       "description": "功能: scrape=单页, batch=批量, deep_crawl=多页爬取, extract=结构化抽取"},
+            "url": {"type": "string", "description": "目标URL"},
+            "urls": {"type": "string", "description": "逗号分隔URL列表 (batch)"},
+            "query": {"type": "string", "description": "深爬过滤关键词"},
+            "depth": {"type": "integer", "description": "爬取深度 (deep_crawl默认2)"},
+            "max_pages": {"type": "integer", "description": "最大页数 (deep_crawl默认10)"},
+            "css_selector": {"type": "string", "description": "CSS选择器聚焦提取"},
+        }, "required": ["action"]})
+
+    # ── OCR（HTTP桥接→Hermes端Unlimited-OCR 9872）──────────────────
+    from .ocr import tool_ocr
+    registry.register("ocr", tool_ocr,
+        "长文档OCR——百度Unlimited-OCR(R-SWA机制)，几十页PDF一次解析。file_type=auto/image/pdf。",
+        schema={"type": "object", "properties": {
+            "file_path": {"type": "string", "description": "图片或PDF文件绝对路径"},
+            "file_type": {"type": "string", "enum": ["auto","image","pdf"], "description": "文件类型(默认auto)"},
+            "prompt": {"type": "string", "description": "OCR提示词"},
+        }, "required": ["file_path"]})
+
     return registry

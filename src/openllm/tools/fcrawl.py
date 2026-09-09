@@ -12,6 +12,9 @@ import sys
 from typing import Any
 
 SCRIPT_PATH = "/home/zcs/.hermes/scripts/fcrawl.py"
+# 钉死Hermes venv python——fcrawl.py依赖(curl_cffi等)装在Hermes venv，
+# openLLM venv零重依赖（2026-09-10 鲁班修：sys.executable在openLLM venv缺依赖必崩）
+HERMES_PY = "/home/zcs/.hermes/hermes-agent/venv/bin/python"
 
 SCHEMA = {
     "name": "fcrawl",
@@ -40,7 +43,7 @@ SCHEMA = {
 
 def handle(action: str, **kwargs) -> str:
     """Action-based wrapper"""
-    cmd = [sys.executable, SCRIPT_PATH, action, "--json"]
+    cmd = [HERMES_PY, SCRIPT_PATH, action, "--json"]
 
     if action == "scrape":
         url = kwargs.get("url")
