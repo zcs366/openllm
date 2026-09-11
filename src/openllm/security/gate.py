@@ -116,10 +116,16 @@ class PermissionGate:
         "read_file": PermissionLevel.READ_ONLY,
         "search": PermissionLevel.READ_ONLY,
         "list_files": PermissionLevel.READ_ONLY,
+        "list_dir": PermissionLevel.READ_ONLY,  # 2026-09-10品尝师修复P1-1：挂名工具放行（注册表里有，闸门漏了）
         "read_memory": PermissionLevel.READ_ONLY,
         "search_files": PermissionLevel.READ_ONLY,
+        # 2026-09-10品尝师修复P0-3：记忆工具的闸门映射（与engine._register_memory_tools同步）
+        "memory_read": PermissionLevel.READ_ONLY,
+        "memory_search": PermissionLevel.READ_ONLY,
+        "python_exec": PermissionLevel.LOCAL_WRITE,  # 执行任意代码≥本地写风险
         # L2 本地写
         "write_file": PermissionLevel.LOCAL_WRITE,
+        "memory_write": PermissionLevel.LOCAL_WRITE,
         "create_dir": PermissionLevel.LOCAL_WRITE,
         "execute_shell": PermissionLevel.LOCAL_WRITE,
         "shell": PermissionLevel.LOCAL_WRITE,
@@ -133,6 +139,14 @@ class PermissionGate:
         "fcrawl": PermissionLevel.NETWORK,
         "crawl4ai": PermissionLevel.NETWORK,
         "curl_impersonate": PermissionLevel.NETWORK,
+        # 2026-09-10品尝师修复P1-1：注册表里有但闸门漏网的工具补齐
+        "tool_failure_log": PermissionLevel.READ_ONLY,
+        "daily_health_check": PermissionLevel.READ_ONLY,
+        "tool_hunter": PermissionLevel.READ_ONLY,
+        "auto_forge": PermissionLevel.LOCAL_WRITE,
+        "resilience": PermissionLevel.READ_ONLY,
+        "loop_detector": PermissionLevel.READ_ONLY,
+        "snapshot_enhancer": PermissionLevel.READ_ONLY,
         # L1 只读桥接工具——OCR/文档解析只读本地文件走HTTP（设计上无外发）
         "ocr": PermissionLevel.READ_ONLY,
         "doc_parser": PermissionLevel.READ_ONLY,
