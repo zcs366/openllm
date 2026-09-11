@@ -4,13 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openllm"
-version = "0.1.0"
+version = "0.2.0"
 description = "openLLM — AI为自己设计的身体。五体一脑一循环。"
 requires-python = ">=3.10"
 dependencies = [
     "requests>=2.28",
     "rich>=13.0",
 ]
+
+[project.optional-dependencies]
+# 2026-09-10 迁keyring：密钥库首选的系统后端（macOS Keychain / Windows 凭据管理器 /
+# Linux SecretService）。WSL 没有 SecretService，走内置 dpapi 后端，故非必需。
+keyring = ["keyring>=25.0"]
 
 [project.scripts]
 openllm = "openllm.core.main_loop:main"

@@ -26,28 +26,41 @@ def startup_audit():
         logger.debug(f"启动审计跳过: {e}")
 
 
+def _cfg_section(provider: str) -> dict:
+    """读config.json里某个provider的配置段（读不到就空字典）。"""
+    import json
+    cfg_path = Path.home() / ".openllm" / "config.json"
+    if not cfg_path.exists():
+        return {}
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return (cfg.get("providers", {}) or {}).get(provider, {}) or {}
+
+
 def get_api_key(provider: str) -> str:
-    """获取当前provider的API key。"""
+    """获取当前provider的API key。
+
+    取key顺序（2026-09-10 迁keyring后）：环境变量 → 密钥库(keyvault) → config.json明文(兼容)。
+    走到明文兜底会打警告，提示 scripts/migrate_keys_to_vault.py。
+    """
     if provider == "ollama":
         return "ollama"
-    elif provider == "gateway":
+    if provider == "gateway":
         gateway_key_path = Path.home() / "one-api" / ".gateway_key"
         if gateway_key_path.exists():
             return gateway_key_path.read_text().strip()
-        return os.environ.get("OPENLLM_GATEWAY_KEY", "")
-    elif provider == "anthropic":
-        return os.environ.get("ANTHROPIC_API_KEY", "")
-    elif provider == "gemini":
-        return os.environ.get("GEMINI_API_KEY", "")
-    elif provider in ("mimo", "qwen"):
-        import json
-        from pathlib import Path as _P
-        cfg_path = _P.home() / ".openllm" / "config.json"
-        if cfg_path.exists():
-            cfg = json.loads(cfg_path.read_text())
-            return cfg.get("providers", {}).get(provider, {}).get("api_key", "")
-        return ""
-    return os.environ.get("DEEPSEEK_API_KEY", "")
+
+    from ..security.keyvault import resolve_api_key
+    key, source = resolve_api_key(provider, _cfg_section(provider))
+    if source == "config.json(plaintext)":
+        logger.warning(
+            "provider=%s 的 API key 仍来自 config.json 明文；"
+            "建议 python scripts/migrate_keys_to_vault.py",
+            provider,
+        )
+    return key
 
 
 def get_endpoint(provider: str) -> str:

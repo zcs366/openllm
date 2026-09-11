@@ -98,9 +98,26 @@ class StartupAuditor:
             return AuditResult(
                 "config_keys", AuditStatus.WARN,
                 f"以下provider有明文API key: {', '.join(plaintext_keys)}",
-                "建议改用环境变量 $ENV_VAR 引用",
+                "建议 python scripts/migrate_keys_to_vault.py（迁入密钥库）",
             )
-        return AuditResult("config_keys", AuditStatus.PASS, "API key安全")
+        # 2026-09-10 迁keyring：明文清干净之后，还要看密钥库后端是谁——
+        # "config.json 里没有明文"不等于"有安全存储"（file 后端仍是明文，只是换了位置）。
+        try:
+            from .keyvault import default_vault
+
+            st = default_vault().status()
+            if not st["secure"]:
+                return AuditResult(
+                    "config_keys", AuditStatus.WARN,
+                    f"无明文key，但密钥库后端不安全: {st['backend']}（{st['detail']}）",
+                    "WSL 下应走 dpapi（Windows 凭据保护）；检查 powershell.exe 是否可达",
+                )
+            return AuditResult(
+                "config_keys", AuditStatus.PASS,
+                f"API key安全（密钥库: {st['backend']}）",
+            )
+        except Exception as e:
+            return AuditResult("config_keys", AuditStatus.PASS, f"API key安全（密钥库未探明: {e}）")
 
     def _check_file_permissions(self) -> AuditResult:
         """检查config.json权限。"""
