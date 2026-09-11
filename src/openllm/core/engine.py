@@ -67,7 +67,11 @@ logger = logging.getLogger("openllm.engine")
 class AgentConfig:
     """Agent全局配置。"""
     name: str = "OpenLLM"
-    provider: str = DEFAULT_PROVIDER
+    # 空串 = 未指定：由 ~/.openllm/config.json 的 default_provider 决定，
+    # 再退到 DEFAULT_PROVIDER。非空 = 调用方显式指定，最高优先级。
+    # （2026-09-10品尝师修复P1-3：旧默认值等于DEFAULT_PROVIDER，导致显式传
+    #  "deepseek" 与"没传"无法区分，config.json 永远被无视。）
+    provider: str = ""
     model: str = "deepseek-chat"
     capsule_dir: str = str(Path.home() / "projects" / "openllm" / "caps")
     max_context_tokens: int = 8192
@@ -143,6 +147,16 @@ class OpenLLMEngine:
         self.error_classifier = ErrorClassifier()
         self.unified_memory = UnifiedMemory()
 
+        # 2026-09-10接骨：本次生命的**唯一会话标识**。
+        # 此前：sleep() 每次新铸 f"s{now}"、memory_write 追加到"当前加载的胶囊"
+        # （可能是别家会话）、因果提取器自己编 "chat_N"——同一次生命的记忆
+        # 被劈进多个胶囊文件，唤醒只念 mtime 最新的那一个，其余永久沉默。
+        # 从此 chat写入 / 工具写入 / sleep写入 / 因果提取，全用这一个 id。
+        self.session_id = f"s{int(time.time())}"
+
+        # 2026-09-10品尝师修复P0-3：挂载记忆读写工具（"请记住X"从空话变成真动作）
+        self._register_memory_tools()
+
         # P2: 优雅停机 + 凭据防火墙
         self.shutdown = GracefulShutdown()
         self.shutdown.register_signal_handlers()
@@ -167,7 +181,7 @@ class OpenLLMEngine:
                         self._checkpoint_region,
                         snapshot_fn=self._checkpoint_snapshot,
                         restore_fn=self._checkpoint_restore,
-                        metadata={"name": config.name, "version": "0.2.0"}
+                        metadata={"name": config.name, "version": self.soul.version}
                     )
                     logger.info(f"  checkpoint region注册: {self._checkpoint_region}")
                 except Exception as e:
@@ -244,6 +258,30 @@ class OpenLLMEngine:
         """初始化模型Provider。支持：deepseek/openai/anthropic/gemini/ollama/mimo/qwen。"""
         try:
             p = self.config.provider
+            # 2026-09-10 迁keyring：取key统一走 engine_utils.get_api_key
+            # （顺序：环境变量 → keyvault → config.json明文兜底+告警）
+            from .engine_utils import get_api_key as _key_of
+            # 2026-09-10品尝师修复P1-3：此前完全无视 config.json 的 default_provider。
+            # 实证：配置写 default_provider=mimo（带endpoint/model/key），引擎仍按
+            # deepseek 找 DEEPSEEK_API_KEY → 永远 no_api，用户配置形同虚设。
+            # 语义：provider 为空 = "未指定"，按 config.json → DEFAULT_PROVIDER 解析；
+            # 非空 = 调用方显式指定，最高优先级（品尝师第一驱就是靠它绕过了当时的bug）。
+            if not p:
+                try:
+                    import json as _jsonmod
+                    _cfg_path = Path.home() / ".openllm" / "config.json"
+                    if _cfg_path.exists():
+                        _cfg = _jsonmod.loads(_cfg_path.read_text())
+                        p = _cfg.get("default_provider", "") or DEFAULT_PROVIDER
+                        self.config.provider = p
+                        _pm = _cfg.get("providers", {}).get(p, {}).get("model", "")
+                        if _pm:
+                            self.config.model = _pm
+                except Exception:
+                    pass
+            if not self.config.provider:
+                self.config.provider = p or DEFAULT_PROVIDER
+                p = self.config.provider
             endpoint = ""
             if p == "ollama":
                 api_key = "ollama"
@@ -266,7 +304,7 @@ class OpenLLMEngine:
                     cfg = json.loads(cfg_path.read_text())
                     mm = cfg.get("providers", {}).get("mimo", {})
                     if not api_key:
-                        api_key = mm.get("api_key", "")
+                        api_key = _key_of("mimo")
                     endpoint = mm.get("endpoint", "")
                     cfg_model = mm.get("model", "")
                     if cfg_model:
@@ -282,7 +320,7 @@ class OpenLLMEngine:
                     cfg = json.loads(cfg_path.read_text())
                     qw = cfg.get("providers", {}).get("qwen", {})
                     if not api_key:
-                        api_key = qw.get("api_key", "")
+                        api_key = _key_of("qwen")
                     endpoint = qw.get("endpoint", "")
                     model = qw.get("model", "qwen3.8-max")
             elif p == "gateway":
@@ -294,7 +332,7 @@ class OpenLLMEngine:
                     cfg = _json.loads(cfg_path.read_text())
                     gw = cfg.get("providers", {}).get("gateway", {})
                     if not api_key:
-                        api_key = gw.get("api_key", "")
+                        api_key = _key_of("gateway")
                     endpoint = gw.get("endpoint", "http://127.0.0.1:13000/v1/chat/completions")
                     cfg_model = gw.get("model", "")
                     if cfg_model:
@@ -302,11 +340,11 @@ class OpenLLMEngine:
                 else:
                     endpoint = "http://127.0.0.1:13000/v1/chat/completions"
             elif p == "anthropic":
-                api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+                api_key = _key_of("anthropic")
             elif p == "gemini":
-                api_key = os.environ.get("GEMINI_API_KEY", "")
+                api_key = _key_of("gemini")
             else:
-                api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+                api_key = _key_of(p)
 
             if not api_key and p not in ("ollama",):
                 return False
@@ -464,6 +502,13 @@ class OpenLLMEngine:
             self.shutdown.complete_wake()
 
         mem_ctx = self.memory.read()
+
+        # 2026-09-10接骨：唤醒即认领。
+        # 恢复到的胶囊属于哪个会话，本次生命就续在谁的账上——而不是另开一本新账
+        # （另开新账正是记忆碎片化的病灶：写在新本子上，唤醒只念最新的本子）。
+        if self.memory.text is not None and getattr(self.memory.text, "session_id", ""):
+            self.session_id = self.memory.text.session_id
+
         session_ctx = {
             "relationship_depth": "老搭档",
             "topic": "general",
@@ -519,13 +564,22 @@ class OpenLLMEngine:
         if self.connected:
             lines.append(f"🔗 模型：{self.config.model}")
         else:
-            lines.append("⚠️ 未连接API（设置 DEEPSEEK_API_KEY 环境变量）")
+            # 2026-09-10品尝师修复：提示按当前provider动态生成，别再教用户设DEEPSEEK_API_KEY
+            _env_hint = {
+                "mimo": "MIMO_API_KEY", "qwen": "ALIBABA_PLAN_API_KEY",
+                "anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY",
+                "deepseek": "DEEPSEEK_API_KEY", "openai": "OPENAI_API_KEY",
+            }.get(self.config.provider, "DEEPSEEK_API_KEY")
+            lines.append(
+                f"⚠️ 未连接API（provider={self.config.provider}，"
+                f"检查 ~/.openllm/config.json 或环境变量 {_env_hint}）"
+            )
 
         # P0: display welcome
         self.display.welcome({
             "name": self.config.name,
-            "version": "v0.2.0",
-            "session_id": f"s{int(time.time())}",
+            "version": f"v{self.soul.version}",
+            "session_id": self.session_id,
             "status": "ready" if self.connected else "no_api",
         })
 
@@ -583,6 +637,89 @@ class OpenLLMEngine:
             "timeout": {"type": "integer", "description": "超时秒数"},
         }, "required": ["code"]},
     }
+
+    def _register_memory_tools(self) -> None:
+        """注册记忆读写工具（2026-09-10品尝师修复P0-3）。
+
+        此前24个工具里没有任何记忆写入工具：用户说"请记住X"，模型只能说
+        "好的我记住了"，可它根本没有手去落盘——记忆永远是断的。
+        这三个工具把 MemoryOS（chat注入用）+ 胶囊（wake恢复用）两层都接通。
+        """
+        def memory_write(key: str, content: str, importance: float = 0.7) -> str:
+            """把一件事写进长期记忆（跨会话保留）。"""
+            self.unified_memory.remember(
+                key, {"content": content},
+                importance=float(importance),
+                ttl=365 * 86400,  # 长期：默认24h会在睡一觉后就过期
+            )
+            # 同步一条洞察进胶囊层，wake() 苏醒时才能把它念出来
+            # 2026-09-10接骨：写进**本次生命自己的账本**。
+            # 此前追加到"当前加载的胶囊"——那可能是别家会话（实证：二驾把洞察
+            # 写进了 MCP 测试留下的 v06_mcp_test_001.json），而 sleep 又会另铸
+            # 一个新文件，两边都念不出来。
+            try:
+                t = self.memory.text
+                if t is None or getattr(t, "session_id", "") != self.session_id:
+                    cap_file = self.memory.capsule_dir / f"v06_{self.session_id}.json"
+                    if cap_file.exists():
+                        self.memory.read(session_id=self.session_id)
+                        t = self.memory.text
+                    if t is None or getattr(t, "session_id", "") != self.session_id:
+                        t = TextCapsule(session_id=self.session_id)
+                t.insights.append(f"{key}: {content}")
+                t.insights = t.insights[-20:]  # 尾部截断，防无限膨胀
+                self.memory.write(t)
+            except Exception as e:
+                logger.debug(f"胶囊同步跳过: {e}")
+            return f"✅ 已记住 [{key}]（importance={importance}，长期）"
+
+        def memory_read(key: str) -> str:
+            """按键取回一条记忆。"""
+            v = self.unified_memory.recall(key)
+            if v is None:
+                return f"（没有键为 '{key}' 的记忆，可先用 memory_search 找）"
+            return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+
+        def memory_search(query: str, top_k: int = 5) -> str:
+            """按关键词检索记忆。"""
+            q = (query or "").lower()
+            hits = []
+            for k in self.unified_memory.list_keys():
+                try:
+                    v = self.unified_memory.recall(k)
+                except Exception:
+                    continue
+                s = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+                if q in k.lower() or q in s.lower():
+                    hits.append(f"[{k}] {s[:200]}")
+                    if len(hits) >= int(top_k):
+                        break
+            return "\n".join(hits) if hits else f"（未找到与 '{query}' 相关的记忆）"
+
+        self.tools.register(
+            "memory_write", memory_write,
+            "把用户要求长期记住的事情写入记忆（跨会话保留）。key=记忆键名，content=内容",
+            schema={"type": "object", "properties": {
+                "key": {"type": "string", "description": "记忆键名，如 '用户偏好'"},
+                "content": {"type": "string", "description": "要记住的内容"},
+                "importance": {"type": "number", "description": "重要度0-1，默认0.7"},
+            }, "required": ["key", "content"]},
+        )
+        self.tools.register(
+            "memory_read", memory_read,
+            "按键名取回一条长期记忆",
+            schema={"type": "object", "properties": {
+                "key": {"type": "string", "description": "记忆键名"},
+            }, "required": ["key"]},
+        )
+        self.tools.register(
+            "memory_search", memory_search,
+            "按关键词检索长期记忆，返回匹配条目",
+            schema={"type": "object", "properties": {
+                "query": {"type": "string", "description": "检索关键词"},
+                "top_k": {"type": "integer", "description": "返回条数，默认5"},
+            }, "required": ["query"]},
+        )
 
     def _build_tools_schema(self) -> list[dict]:
         """从工具注册表生成OpenAI风格tools声明（function calling）。
@@ -833,8 +970,10 @@ class OpenLLMEngine:
             try:
                 from ..memory.session_causal_extractor import SessionCausalExtractor
                 extractor = SessionCausalExtractor()
-                # 获取当前会话ID（从memory获取）
-                session_id = getattr(self.memory, '_session_id', None) or f"chat_{self._chat_round_counter}"
+                # 获取当前会话ID
+                # 2026-09-10接骨：用引擎的会话标识，别再自己编 "chat_N"
+                # （编出来的 id 在提取器那边找不到任何会话文件，提取必然空转）
+                session_id = self.session_id
                 result = extractor.extract_from_session(session_id)
                 if result.get('causal_chains', 0) > 0:
                     logger.info(f"会话因果提取: {result['causal_chains']}条, 写入{result['written']}条")
@@ -1173,14 +1312,39 @@ class OpenLLMEngine:
 
         if user_msgs:
             decisions.append({"summary": f"对话{self.loop.turn_count}轮，最后：{user_msgs[-1].content[:80]}"})
-        if assistant_msgs:
-            insights.append(f"模型最后回应：{assistant_msgs[-1].content[:80]}")
+
+        # 2026-09-10接骨：模型回声归 outputs，不占 insights。
+        # wake() 只念 insights——此前把"模型最后回应"塞进 insights，每次苏醒
+        # 都听见自己上一轮的独白（二驾腿3 实证：赢来的是一段走错房间的噪声）。
+        # （outputs 已在下方由 assistant_msgs[-3:] 承载）
+
+        # 2026-09-10接骨：**不另开账本，且合并而非覆盖**。
+        # 此前每次 sleep 都新铸 f"s{now}" 写一个新文件：①同一次生命的记忆被劈成
+        # 两个文件；②新文件覆盖不了旧文件、唤醒只念 mtime 最新那个；③更要命的是
+        # sleep 用自己的 decisions/insights 直接覆盖本会话胶囊，会把会话中
+        # memory_write 存进去的洞察整段抹掉。
+        prev = self.memory.text
+
+        def _prev_list(attr: str) -> list:
+            """本会话旧账本里的某个字段；不是本会话（或没有账本）则为空。"""
+            if prev is None or getattr(prev, "session_id", "") != self.session_id:
+                return []
+            return list(getattr(prev, attr, None) or [])
+
+        def _merge(old, fresh, keep: int) -> list:
+            """保留旧条目（去重），新条目追加在尾，尾部截断防无限膨胀。"""
+            merged = [x for x in (old or []) if x not in fresh] + list(fresh)
+            return merged[-keep:]
 
         text = TextCapsule(
-            session_id=f"s{int(time.time())}",
-            decisions=decisions,
-            insights=insights,
-            outputs=[m.content[:200] for m in assistant_msgs[-3:]],
+            session_id=self.session_id,
+            decisions=_merge(_prev_list("decisions"), decisions, 8),
+            insights=_merge(_prev_list("insights"), insights, 20),
+            outputs=_merge(
+                _prev_list("outputs"),
+                [m.content[:200] for m in assistant_msgs[-3:]],
+                8,
+            ),
         )
 
         # Δ向量（从真实对话文本提取）
@@ -1202,7 +1366,7 @@ class OpenLLMEngine:
         snap = self.dashboard.evaluate(self.loop.context_used, self.loop.turn_count)
         return {
             "name": self.config.name,
-            "version": "0.2.0",
+            "version": self.soul.version,
             "state": v["state"],
             "turns": v["turn_count"],
             "context_pct": v["context_used_pct"],

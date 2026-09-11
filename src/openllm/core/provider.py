@@ -10,6 +10,7 @@ Phase 1: DeepSeek API 优先。
 """
 import json
 import os
+import re
 import time
 import logging
 from dataclasses import dataclass, field
@@ -79,6 +80,7 @@ class ModelResponse:
     latency_ms: float = 0.0
     finish_reason: str = "stop"
     tool_calls: Optional[list] = None  # OpenAI原生tool_calls（[{id,type,function:{name,arguments}}]）
+    reasoning: str = ""  # 推理模型的思考过程（2026-09-10品尝师修复：与content分离，不混入回答）
 
 
 # ── Provider 实现 ───────────────────────────────────
@@ -128,6 +130,22 @@ class DeepSeekProvider:
         else:
             return self._sync_chat(payload, t0)
 
+    @staticmethod
+    def _split_reasoning_tag(text: str) -> tuple[str, str]:
+        """剥离 <think>...</think> 标签包裹的思考过程（2026-09-10品尝师修复P0-1嘴漏）。
+
+        mimo等推理模型有时把思考直接以<think>标签内联在content里。
+        Returns: (answer, reasoning)
+        """
+        if "</think>" not in text:
+            return text, ""
+        m = re.search(r"<think>(.*?)</think>", text, re.DOTALL)
+        if not m:
+            return text, ""
+        reasoning = m.group(1).strip()
+        answer = (text[:m.start()] + text[m.end():]).strip()
+        return answer, reasoning
+
     def _build_messages(self, messages: list[ChatMessage], system: Optional[str] = None) -> list[dict]:
         """构建消息列表。"""
         result = []
@@ -152,13 +170,20 @@ class DeepSeekProvider:
             usage = data.get("usage", {})
             # P0修复：解析OpenAI原生tool_calls（纯工具调用时content可能为null）
             tool_calls = message.get("tool_calls") or None
+            # 2026-09-10品尝师修复P0-1：content与reasoning分离
+            content = message.get("content") or ""
+            reasoning = message.get("reasoning_content") or ""
+            answer, inline_think = self._split_reasoning_tag(content)
+            if not answer.strip() and reasoning.strip():
+                answer = reasoning  # 仅在content确实为空时兜底（推理token耗尽场景）
             response = ModelResponse(
-                content=message.get("content") or "",
+                content=answer,
                 model=data.get("model", self.config.model),
                 usage=usage,
                 latency_ms=(time.time() - t0) * 1000,
                 finish_reason=choice.get("finish_reason", "stop"),
                 tool_calls=tool_calls,
+                reasoning=(inline_think + "\n" + reasoning).strip(),
             )
             # 成本跟踪：写入model trace
             self._record_model_trace(response, usage)
@@ -182,6 +207,7 @@ class DeepSeekProvider:
         function.arguments增量片段，按index合并后还原完整结构。
         """
         full_content = ""
+        full_reasoning = ""  # 2026-09-10品尝师修复P0-1：reasoning单独累积，不混入content
         # 流式tool_calls分片累积：index -> 已合并的tool_call dict
         tool_calls_acc: dict[int, dict] = {}
         try:
@@ -206,10 +232,13 @@ class DeepSeekProvider:
                         if not choices:
                             continue
                         delta = choices[0].get("delta", {})
-                        token = delta.get("content", "")
-                        # 推理模型: content可能在reasoning_content里
-                        if not token:
-                            token = delta.get("reasoning_content", "")
+                        # 2026-09-10品尝师修复P0-1嘴漏：content与reasoning_content分流。
+                        # 旧逻辑：token为空就抓reasoning_content，导致思考过程整段混入回答。
+                        token = delta.get("content", "") or ""
+                        r_token = delta.get("reasoning_content", "") or ""
+                        if r_token:
+                            full_reasoning += r_token
+                            # 思考过程不进on_token（不打到终端），只累积供内省
                         if token:
                             full_content += token
                             on_token(token)
@@ -236,11 +265,18 @@ class DeepSeekProvider:
                 [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
                 if tool_calls_acc else None
             )
+            # 2026-09-10品尝师修复P0-1：content为空且只有reasoning时（推理token耗尽），
+            # 才用reasoning兜底；并剥离内联<think>标签。
+            answer, inline_think = self._split_reasoning_tag(full_content)
+            if not answer.strip() and full_reasoning.strip():
+                answer = full_reasoning
+            reasoning_all = (inline_think + "\n" + full_reasoning).strip()
             response = ModelResponse(
-                content=full_content,
+                content=answer,
                 model=self.config.model,
                 latency_ms=(time.time() - t0) * 1000,
                 tool_calls=tool_calls,
+                reasoning=reasoning_all,
             )
             # 成本跟踪：流式模式无usage数据，只记录latency
             self._record_model_trace(response, {})
