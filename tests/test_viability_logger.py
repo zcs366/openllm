@@ -298,8 +298,9 @@ class TestAdaptiveWeights:
         assert "weights_adapted" in record
         assert record["weights_adapted"]["M"] == 0.35
         assert record["weights_adapted"]["S"] == 0.25
-        # weights_used与v_result实际参与分量一致，不再被adapted覆盖
-        assert record["weights_used"] == record["v_result"]["weights_used"]
+        # 账目修正核心断言：顶层不再有weights_used——adapted完整配置
+        # 不能冒充"实际参与分量的权重"（v_result内的weights_used由io-s提供）
+        assert "weights_used" not in record
 
     @patch(
         "openllm.memory.viability_logger._load_compute_viability",
