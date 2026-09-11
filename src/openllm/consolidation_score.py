@@ -96,7 +96,7 @@ class Provenance:
 
 @dataclass
 class Bullet:
-    """固化候选条目——ACE bullet骨架 + provenance补维。
+    """固化候选条目——ACE bullet骨架 + provenance补维 + 信念状态补维(v0.4校准)。
 
     Attributes:
         bullet_id: 唯一标识（ACE: unique identifier）
@@ -109,6 +109,9 @@ class Bullet:
         provenance: 来源标签（P6）
         created_at / updated_at: 时间戳
         consolidated: 是否已固化（固化后置True，条目升级为持久层）
+        last_verified: 最后被验证的时间戳（0=从未验证）——信念状态v0.4新增
+        verification_count: 被验证总次数——信念状态v0.4新增
+        verification_failures: 验证失败次数——信念状态v0.4新增
     """
     bullet_id: str
     content: str
@@ -121,6 +124,10 @@ class Bullet:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     consolidated: bool = False
+    # ── 信念状态补维（祖宾校准 · 2026-09-10）──
+    last_verified: float = 0.0
+    verification_count: int = 0
+    verification_failures: int = 0
 
     def score(self, trust_threshold: TrustLevel = DEFAULT_TRUST_THRESHOLD) -> float:
         """宪章公式：Score = 复现次数 + 2×任务增益% + 3×遗忘代价。
@@ -129,16 +136,32 @@ class Bullet:
         harmful净扣：ACE的harmful计数器在此生效——
           有效复现 = max(0, recurrence + helpful - harmful)，
           有害标记直接侵蚀固化资格（毒条目攒不出分）。
+        v0.4校准加成（祖宾信念状态）：验证过的条目加成，验证失败的条目衰减——
+          verified_bonus = verification_count>0 时 +0.5×min(verification_count,3)/3
+          failure_penalty = verification_failures>0 时 -0.3×verification_failures
+          时间衰减：90天未验证 ×0.9（祖宾：不确定性的时间维度）
         """
         # ── P6门禁（先于一切计算）──
         if _TRUST_ORDER[self.provenance.trust] < _TRUST_ORDER[trust_threshold]:
             return 0.0
         effective_recurrence = max(0, self.recurrence + self.helpful - self.harmful)
-        return (
+        base = (
             W_RECURRENCE * effective_recurrence
             + W_GAIN * self.task_gain_pct
             + W_FORGET * self.forget_cost
         )
+        # ── v0.4 校准加成 ──
+        bonus = 0.0
+        if self.verification_count > 0:
+            bonus += 0.5 * min(self.verification_count, 3) / 3.0
+        if self.verification_failures > 0:
+            bonus -= 0.3 * self.verification_failures
+        # 时间衰减：90天未验证打九折
+        if self.last_verified > 0:
+            age_days = (time.time() - self.last_verified) / 86400
+            if age_days > 90:
+                base *= 0.9
+        return max(0.0, base + bonus)
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
@@ -153,6 +176,9 @@ class Bullet:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "consolidated": self.consolidated,
+            "last_verified": self.last_verified,
+            "verification_count": self.verification_count,
+            "verification_failures": self.verification_failures,
         }
         return d
 
@@ -170,6 +196,9 @@ class Bullet:
             created_at=d.get("created_at", time.time()),
             updated_at=d.get("updated_at", time.time()),
             consolidated=d.get("consolidated", False),
+            last_verified=d.get("last_verified", 0.0),
+            verification_count=d.get("verification_count", 0),
+            verification_failures=d.get("verification_failures", 0),
         )
 
 

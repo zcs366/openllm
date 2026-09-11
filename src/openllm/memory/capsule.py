@@ -296,9 +296,31 @@ class MemoryOS:
         return str(v06_path)
 
     def read(self, session_id: Optional[str] = None) -> dict:
-        """读取最新胶囊，恢复记忆。"""
-        # 找最新v0.6
-        v06_files = sorted(self.capsule_dir.glob("v06_*.json"), reverse=True)
+        """读取最新胶囊，恢复记忆。
+
+        2026-09-10品尝师修复P0-2：旧逻辑 sorted(glob, reverse=True) 按**文件名字典序**
+        找"最新"，session_id字母序小的新胶囊永远被旧文件霸占唤醒位
+        （实证：v06_verify_s001.json 9/1的测试垃圾压住9/10的新写入）。
+        新逻辑：优先按胶囊内timestamp，回退文件mtime；显式传session_id则精确读取。
+        """
+        def _cap_mtime(p: Path) -> float:
+            try:
+                return json.load(open(p, encoding="utf-8")).get("timestamp", 0.0)
+            except Exception:
+                try:
+                    return p.stat().st_mtime
+                except Exception:
+                    return 0.0
+
+        if session_id:
+            # 显式session_id：精确读取指定胶囊
+            exact = self.capsule_dir / f"v06_{session_id}.json"
+            v06_files = [exact] if exact.exists() else []
+        else:
+            v06_files = sorted(
+                self.capsule_dir.glob("v06_*.json"),
+                key=_cap_mtime, reverse=True,
+            )
         if not v06_files:
             return {"status": "empty", "context": "无记忆。第一次对话？"}
 
@@ -307,8 +329,11 @@ class MemoryOS:
             data = json.load(f)
         self.text = TextCapsule.from_dict(data)
 
-        # 找最新v0.7
-        v07_files = sorted(self.capsule_dir.glob("v07_*.json"), reverse=True)
+        # 找最新v0.7（同样按时间而非字典序；优先匹配text的session）
+        v07_files = sorted(
+            self.capsule_dir.glob("v07_*.json"),
+            key=_cap_mtime, reverse=True,
+        )
         if v07_files:
             with open(v07_files[0], "r", encoding="utf-8") as f:
                 self.delta = DeltaCapsule.from_dict(json.load(f))
