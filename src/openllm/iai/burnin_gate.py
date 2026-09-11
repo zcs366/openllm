@@ -214,8 +214,12 @@ class BurnInGate:
 
     # ── 核心判定（纯函数，无副作用）────────────────────────
 
-    def evaluate(self, ev: GateEvidence) -> GateVerdict:
-        """三态判定。B0硬门 → B1 V判据（shadow/enforce分支）。"""
+    def evaluate(self, ev: GateEvidence, retest_fn: Optional[Callable[[], float]] = None) -> GateVerdict:
+        """三态判定。B0硬门 → B1 V判据（shadow/enforce分支）。
+
+        retest_fn: 可选注入（默认None=关闭）。在enforce模式(shadow=False)下
+        被调用以获取独立于v_snapshot的V_new。返回float分数；抛异常→not_evaluable。
+        """
         h = {
             "adapter_sha": ev.adapter_sha,
             "snapshot_id": ev.snapshot_id,
@@ -252,14 +256,38 @@ class BurnInGate:
         v_new = (ev.v_snapshot or {}).get("V")
         base = self.v_baseline()
         eps = compute_epsilon(self._state["delta_v"], self.sigma_repeat)
+        retest_evidence = {}  # B1-RE：retest 证据（默认空=未调 retest_fn）
 
         # V=None → not_evaluable（试管爆裂≠没病）
         if v_new is None:
-            return GateVerdict(
-                verdict="not_evaluable",
-                reason="b1-v-none: V值不可得（试管爆裂≠没病）——shadow记录/enforce挂起",
-                evidence=ev, v_baseline=base, epsilon=None, h=h,
-            )
+            # ── B1-retest: V缺失+enforce+retest_fn → 尝试独立重测 ──
+            retest_evidence = {}
+            if retest_fn is not None and not self.shadow:
+                t0 = time.time()
+                try:
+                    v_new = float(retest_fn())
+                    retest_evidence = {
+                        "retest_score": v_new,
+                        "retest_source": "retest_fn",
+                        "retest_duration_s": round(time.time() - t0, 3),
+                    }
+                except Exception as exc:
+                    # 试管爆裂≠没病：retest失败不崩溃，判not_evaluable
+                    logger.warning(
+                        "[burnin_gate] retest_fn失败(→not_evaluable): %s", exc
+                    )
+                    h["retest_error"] = str(exc)
+                    return GateVerdict(
+                        verdict="not_evaluable",
+                        reason="b1-v-none+retest-failed: V值不可得且retest异常——拒绝挂起",
+                        evidence=ev, v_baseline=base, epsilon=None, h=h,
+                    )
+            else:
+                return GateVerdict(
+                    verdict="not_evaluable",
+                    reason="b1-v-none: V值不可得（试管爆裂≠没病）——shadow记录/enforce挂起",
+                    evidence=ev, v_baseline=base, epsilon=None, h=h,
+                )
 
         # 分量基数跳变 → not_evaluable 退回B0语义（自欺容差防御）
         if base is not None and self._state["v_history"]:
@@ -270,6 +298,7 @@ class BurnInGate:
                     break
             new_comps = _v_components(ev.v_snapshot)
             if last_comps is not None and new_comps is not None and last_comps != new_comps:
+                h["retest"] = retest_evidence  # retest证据附着（B1-RE）
                 return GateVerdict(
                     verdict="not_evaluable",
                     reason=(
@@ -282,6 +311,7 @@ class BurnInGate:
 
         # 基线/ε不可得 → B0通过即放行（shadow期语义）
         if base is None or math.isinf(eps):
+            h["retest"] = retest_evidence  # retest证据附着（B1-RE）
             return GateVerdict(
                 verdict="passed",
                 reason="passed-by-b0: B1冷启动（无基线或ΔV样本<3，ε=∞）——B0硬门已过",
@@ -289,9 +319,33 @@ class BurnInGate:
                 epsilon=None if math.isinf(eps) else eps, h=h,
             )
 
+        # ── B1-retest: enforce模式下retest_fn覆盖v_snapshot的V_new ──
+        retest_evidence = {}
+        if retest_fn is not None and not self.shadow:
+            t0 = time.time()
+            try:
+                v_retest = float(retest_fn())
+                retest_evidence = {
+                    "retest_score": v_retest,
+                    "retest_source": "retest_fn",
+                    "retest_duration_s": round(time.time() - t0, 3),
+                }
+                v_new = v_retest  # retest覆盖v_snapshot值
+            except Exception as exc:
+                logger.warning(
+                    "[burnin_gate] retest_fn失败(→not_evaluable): %s", exc
+                )
+                h["retest_error"] = str(exc)
+                return GateVerdict(
+                    verdict="not_evaluable",
+                    reason="b1-retest-failed: retest_fn异常——拒绝挂起（不崩溃）",
+                    evidence=ev, v_baseline=base, epsilon=eps, h=h,
+                )
+
         # V 判据本体
         if v_new < base - eps:
             reason = f"b1-v-drift: V_new={v_new} < V_baseline({base}) − ε({eps:.4f})"
+            h["retest"] = retest_evidence  # retest证据附着（B1-RE）
             if self.enforce_ready():
                 return GateVerdict(
                     verdict="rejected", reason=reason,
@@ -303,6 +357,7 @@ class BurnInGate:
                 evidence=ev, v_baseline=base, epsilon=eps, h=h,
             )
 
+        h["retest"] = retest_evidence  # retest证据附着（B1-RE）
         return GateVerdict(
             verdict="passed",
             reason=f"passed: B0硬门+B1 V判据全过（V_new={v_new} ≥ {base}−{eps:.4f}）",
@@ -315,13 +370,15 @@ class BurnInGate:
         self,
         ev: GateEvidence,
         rollback_fn: Optional[Callable[[], bool]] = None,
+        retest_fn: Optional[Callable[[], float]] = None,
     ) -> GateVerdict:
         """完整门禁：evaluate → rejected时真回滚 → 记账 → 总线事件。
 
         rollback_fn: 注入 NightlyGuard.auto_rollback（依赖方向：调用方组装，
         本模块不import nightly_guard——保持判定器纯粹可测）。
+        retest_fn: 可选注入（B1-retest：enforce模式下的独立V重测）。
         """
-        verdict = self.evaluate(ev)
+        verdict = self.evaluate(ev, retest_fn=retest_fn)
 
         # rejected → 真回滚（P0-A执行臂）
         if verdict.verdict == "rejected" and rollback_fn is not None:

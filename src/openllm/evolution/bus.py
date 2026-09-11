@@ -49,6 +49,10 @@ KNOWN_TYPES = {
     "metabolic.sample",    # 代谢变量采样（P1-E）
     "gate.passed",         # 权重通道门禁放行（BurnInGate P0，2026-09-06）
     "gate.rejected",       # 权重通道门禁拒绝（含回滚状态；部署侧只认passed）
+    "rule.probed",         # 规则变更探针报告（R度量；供三角制衡消费）
+    "knowledge.probed",    # 知识单调性探针报告（K度量；灾难性遗忘检测）
+    "triad.probed",        # 三角制衡耦合探针报告（T4：K-R耦合系数）
+    "closure.probed",      # O度量：锚点closure应激探针报告（三区判定）
 }
 
 
