@@ -79,9 +79,19 @@ class IamIntegration:
         
         try:
             import importlib.util as _ilu
-            _spec = _ilu.spec_from_file_location("iam_harness", IAM_HARNESS_PATH.parent / "iam_harness" / "__init__.py")
+            import sys as _sys
+            _pkg_path = IAM_HARNESS_PATH.parent / "iam_harness" / "__init__.py"
+            _spec = _ilu.spec_from_file_location(
+                "iam_harness", _pkg_path,
+                # 2026-09-10品尝师修复P1-2：必须声明submodule_search_locations，
+                # file-based加载的包才有__path__，子模块from .store import才能解析。
+                submodule_search_locations=[str(IAM_HARNESS_PATH)],
+            )
             if _spec and _spec.loader:
                 _mod = _ilu.module_from_spec(_spec)
+                # 2026-09-10品尝师修复P1-2：必须先注册进sys.modules，
+                # 否则__init__里的 `from .store import ...` 相对导入找不到父包。
+                _sys.modules["iam_harness"] = _mod
                 _spec.loader.exec_module(_mod)
                 retrieve = _mod.retrieve
                 format_for_injection = _mod.format_for_injection

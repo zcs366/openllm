@@ -34,7 +34,7 @@ class Soul:
       - relationship: 关系深度（"我"和谁是什么关系）
     """
     name: str = "OpenLLM"
-    version: str = "0.1.0"
+    version: str = "0.2.0"
     creator: str = "张成市"
     created: str = "2026-05-25"
     mission: str = "AI经验积累系统——让AI从每次交互中学习、校准自身行为、选择性遗忘。"
