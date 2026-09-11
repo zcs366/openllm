@@ -52,13 +52,22 @@ else
 fi
 
 # ── Probe 3: triad_coupling_probe (三角制衡 T4) ──
-# 消费前两者的当日输出，最后跑
+# 2026-09-11暂停(0911复核P0-3)：gate四类输入事件全期0条生产(门影子期零判决)
+# → K-R耦合系数按构造恒为0，decoupled判决是构造性结论非新信息；
+# 且triad.probed无注册消费者=断头管，bus每跑必告警。
+# 解锁条件(⑥-z)：gate.passed/gate.rejected开始出判决 + triad.probed接上消费者后，
+# 恢复本段并将--days调回30。
+TRIAD_ENABLED=0
+if [ "${TRIAD_ENABLED}" = "1" ]; then
 echo "[3/3] triad_coupling_probe (三角制衡 T4) ..." | tee -a "${LOG}"
 if ${PYTHON} -m openllm.evolution.triad_coupling_probe --days 30 --emit 2>&1 | tee -a "${LOG}"; then
     echo "[3/3] triad_coupling_probe: OK" | tee -a "${LOG}"
 else
     echo "[3/3] triad_coupling_probe: FAILED (exit $?)" | tee -a "${LOG}"
     FAILURES=$((FAILURES + 1))
+fi
+else
+    echo "[3/3] triad_coupling_probe: SKIPPED (输入源不存在+断头管，见0911复核；解锁=gate出判决+消费者接上)" | tee -a "${LOG}"
 fi
 
 # ── 汇总 ──

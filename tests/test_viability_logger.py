@@ -291,12 +291,15 @@ class TestAdaptiveWeights:
         return_value=MOCK_WEIGHTS,
     )
     def test_adaptive_weights_recorded(self, _mock_w, _mock_cv, v_log):
-        """mock read_current_weights 返回权重 → 记录含 weights_used。"""
+        """mock read_current_weights 返回权重 → 记录含 weights_adapted（2026-09-11账目修正：
+        weights_used只保留v_result实际参与分量的权重；adapted完整配置单列weights_adapted）。"""
         record = log_viability(log_path=v_log, bus=None)
         assert record is not None
-        assert "weights_used" in record
-        assert record["weights_used"]["M"] == 0.35
-        assert record["weights_used"]["S"] == 0.25
+        assert "weights_adapted" in record
+        assert record["weights_adapted"]["M"] == 0.35
+        assert record["weights_adapted"]["S"] == 0.25
+        # weights_used与v_result实际参与分量一致，不再被adapted覆盖
+        assert record["weights_used"] == record["v_result"]["weights_used"]
 
     @patch(
         "openllm.memory.viability_logger._load_compute_viability",

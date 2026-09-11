@@ -134,7 +134,10 @@ def log_viability(log_path: Optional[Path] = None, bus: Any = "auto") -> Optiona
         "v_result": v_result,
     }
     if adapted is not None:
-        record["weights_used"] = adapted
+        # 2026-09-11账目修正(0911复核N4)：adapted含未参与分量的权重(如E:0.2)，
+        # 原来直接覆盖record["weights_used"]造成"账目不平"假象——
+        # v_result.weights_used只含实际参与分量(诚实)，adapted完整配置单列。
+        record["weights_adapted"] = adapted
     target = log_path or VIABILITY_LOG
     try:
         _append_jsonl(target, record)
