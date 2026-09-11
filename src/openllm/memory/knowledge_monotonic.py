@@ -64,6 +64,12 @@ def _md5(text: str) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 
+# 哈希方案版本（2026-09-11 v2：jiak只哈希稳定知识核，见_count_jiak_cards）
+# 变更哈希字段集合时必须递增此版本——check_monotonic 见到方案切换会判
+# recalibrating 而不是 regression，防止新旧方案交替的一轮误报。
+_HASH_SCHEME = "v2_core_fields"
+
+
 def _count_capsule_files() -> tuple[int, list[str]]:
     """统计capsule容器：v06+v07+checkpoint文件总数，返回(计数, [内容哈希列表])。"""
     if not _CAPSULE_DIR.exists():
@@ -80,15 +86,29 @@ def _count_capsule_files() -> tuple[int, list[str]]:
 
 
 def _count_jiak_cards() -> tuple[int, list[str]]:
-    """统计jiak卡片容器。"""
+    """统计jiak卡片容器。
+
+    2026-09-11 双峰修复：此前对卡片JSON全文做MD5，而卡片含大量易变字段
+    （last_accessed/access_count/_timestamp_utc/moments等）——夜间读卡刷新
+    访问元数据，06:30探针即见"97.9%内容换血"假象，K判决被自己污染
+    （探针读卡的动作被记成了知识丢失）。现只哈希稳定知识核：
+    card_id+title+summary+keywords(sorted)+memory_type。
+    """
     if not _JIAK_CARDS_DIR.exists():
         return 0, []
     hashes = []
     for p in _JIAK_CARDS_DIR.glob("*.json"):
         try:
-            content = p.read_text(encoding="utf-8")
-            hashes.append(_md5(content))
-        except OSError:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            core = "|".join([
+                str(d.get("card_id", "")),
+                str(d.get("title", "")),
+                str(d.get("summary", "")),
+                json.dumps(sorted(d.get("keywords", [])), ensure_ascii=False),
+                str(d.get("memory_type", "")),
+            ])
+            hashes.append(_md5(core))
+        except (OSError, json.JSONDecodeError, ValueError):
             pass
     return len(hashes), hashes
 
@@ -169,6 +189,7 @@ class KnowledgeMonotonicProbe:
 
         snapshot["counts"] = counts
         snapshot["content_hashes"] = all_hashes  # recall比对用
+        snapshot["hash_scheme"] = _HASH_SCHEME  # 2026-09-11: 方案版本，防新旧交替误报
 
         # 内容摘要digest（全库哈希拼接的截断）
         combined = "|".join(
@@ -217,6 +238,20 @@ class KnowledgeMonotonicProbe:
 
         old = snapshots[-2]
         new = snapshots[-1]
+
+        # 0. 哈希方案守卫（2026-09-11）：新旧快照方案不同→哈希不可比，
+        #    判recalibrating不判regression（防方案切换当轮误报"丢失全部"）
+        if old.get("hash_scheme") != new.get("hash_scheme"):
+            return KnowledgeReport(
+                capacity_delta={},
+                recall=1.0,  # 方案切换轮哈希不可比，recall无意义，取中性值
+                accuracy_sample=1.0,
+                verdict="recalibrating",
+                detail=(
+                    f"哈希方案切换：{old.get('hash_scheme', 'v1_full_json')} → "
+                    f"{new.get('hash_scheme', 'v1_full_json')}，本轮只重建基线不判罚"
+                ),
+            )
 
         # 1. 容量增量
         capacity_delta: Dict[str, int] = {}
