@@ -3,13 +3,13 @@ chcp 65001 >nul
 title openLLM Agent
 echo.
 echo  ============================================
-echo    openLLM  ·  AI 经验积累系统
-echo    六体架构：IAI · IAX · ISA · IOS · ISN · IKO
+echo    openLLM  -  AI experience system
+echo    Six bodies: IAI IAX ISA IOS ISN IKO
 echo  ============================================
 echo.
-echo  正在启动 Agent 模式（/model 切换模型，/exit 退出）...
+echo  Starting Agent mode (/model to switch, /exit to quit)...
 echo.
-wsl -e bash -lc "cd /mnt/i/openllm && HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m openllm.cli.main"
+wsl -e bash -lc "cd /mnt/i/openllm && HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -c 'from openllm.cli.main import main; main()'"
 echo.
-echo  openLLM 已退出。
+echo  openLLM exited.
 pause
