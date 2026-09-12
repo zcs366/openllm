@@ -66,7 +66,7 @@ class AgentShell(cmd.Cmd):
         finally:
             sys.stdout, sys.stderr = old_stdout, old_stderr
         print(f" {C.GREEN}OK{C.RESET}")
-        print(f"{C.DIM}  五体就绪 · 研究引擎就绪 · mimo-v2.5在线{C.RESET}")
+        print(f"{C.DIM}  六体就绪 · 研究引擎就绪 · 真模型在线{C.RESET}")
         print()
 
     def default(self, line: str):
@@ -97,13 +97,20 @@ class AgentShell(cmd.Cmd):
         is_simple = len(line) < 50 and not any(w in line for w in ["搜", "搜索", "写", "读", "执行", "分析"])
         
         if is_simple:
-            # 直接调LLM，不走心跳
+            # 直接调LLM，不走心跳（但必须注入身份，否则暴露底层模型名）
             old_out, old_err = sys.stdout, sys.stderr
             sys.stdout = io.StringIO()
             sys.stderr = io.StringIO()
             try:
                 provider = self.agent.octopus.left.provider
-                result = provider.chat([{"role": "user", "content": line}])
+                _system = (
+                    "你是openLLM——一个自主Agent。工具即火，火即工具。"
+                    "你必须以openLLM自称，不要以任何底层模型名称（如MiMo、Qwen、GPT）自称。"
+                )
+                result = provider.chat([
+                    {"role": "system", "content": _system},
+                    {"role": "user", "content": line},
+                ])
             finally:
                 sys.stdout, sys.stderr = old_out, old_err
         else:
