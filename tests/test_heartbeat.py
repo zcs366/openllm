@@ -10,7 +10,7 @@
 """
 import time
 import pytest
-from openllm.core.heartbeat import (
+from openllm.iax.heartbeat import (
     Heartbeat,
     HeartbeatState,
     HeartbeatEvent,

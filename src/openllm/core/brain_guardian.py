@@ -3,7 +3,7 @@
 一脑改代码失明时，另一脑接管（继续/回滚）。
 集成三大子系统：
   - Hemisphere 心跳互检（hemispheres.py）
-  - EffectContext 可逆效应代数（cordis/runtime.py）
+  - EffectContext 可逆效应代数（iax/cordis.py）
   - SelfModificationGuard 禁区守卫（governance/self_modification_guard.py）
 
 核心流程 apply_code_change：
@@ -25,8 +25,8 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger("openllm.core.brain_guardian")
 
-from openllm.cordis.runtime import Effect, EffectContext
-from openllm.core.hemispheres import (
+from openllm.iax.cordis import Effect, EffectContext
+from openllm.iax.hemispheres import (
     HemispherePair,
     HemisphereState,
 )

@@ -48,7 +48,7 @@ FORBIDDEN_PATHS: list[str] = [
     r"[\\/]governance[\\/]",
     r"[\\/]governance_engine\.py$",
     r"[\\/]ios_arbitrate\.py$",
-    # Heartbeat ontic: agent_heartbeat.py, core/clock.py
+    # Heartbeat ontic: agent_heartbeat.py, clock.py（归位 iax/ 后仍在 ontic 名单）
     r"[\\/]agent_heartbeat\.py$",
     r"[\\/]clock\.py$",
 ]

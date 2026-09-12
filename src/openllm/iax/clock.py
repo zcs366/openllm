@@ -5,7 +5,7 @@ openLLM 时钟 — 账本式心跳记录（E2·2026-08-23）
 钟是疤的轴，疤是钟的刻度。
 
 用法:
-    from openllm.core.clock import Clock
+    from openllm.iax.clock import Clock
     clock = Clock()
     clock.tick("beat")
     clock.tick("awakening", awakening_id="session_xxx")

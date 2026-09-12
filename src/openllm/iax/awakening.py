@@ -23,9 +23,9 @@ from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .main_loop import Agent
-    from .session import Session
-    from .models import Context
+    from openllm.core.main_loop import Agent
+    from openllm.core.session import Session
+    from openllm.core.models import Context
 
 logger = logging.getLogger("openllm.awakening")
 

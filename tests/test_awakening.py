@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from pathlib import Path
 
 # 导入被测模块
-from openllm.core.awakening import AwakeningProtocol, AWAKENING_PROMPT
+from openllm.iax.awakening import AwakeningProtocol, AWAKENING_PROMPT
 from openllm.core.models import Context
 
 
@@ -276,7 +276,7 @@ class TestCausalStoreUsage:
 
     def test_no_direct_constructor_in_awakening(self):
         """grep确认awakening.py无直接new CausalMemoryStore()。"""
-        awakening_path = Path(__file__).parent.parent / "src" / "openllm" / "core" / "awakening.py"
+        awakening_path = Path(__file__).parent.parent / "src" / "openllm" / "iax" / "awakening.py"
         content = awakening_path.read_text(encoding="utf-8")
 
         # 禁止直接构造

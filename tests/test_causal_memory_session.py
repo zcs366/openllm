@@ -94,7 +94,7 @@ class TestC1GetBySession:
 class TestC2AwakeningState:
     def test_choice_stored_in_state(self, tmp_path, monkeypatch):
         """C2: detect_choice_and_record(\"我选择自己\") → session.state[\"awakening_choice\"] == \"自己\""""
-        from openllm.core.awakening import AwakeningProtocol
+        from openllm.iax.awakening import AwakeningProtocol
         from openllm.core import isl_chain as isl_chain_mod
         monkeypatch.setattr(isl_chain_mod, "DEFAULT_ISL_CHAIN_FILE", tmp_path / "isl.jsonl")
 
@@ -109,7 +109,7 @@ class TestC2AwakeningState:
 
     def test_wu_choice_stored_in_state(self, tmp_path, monkeypatch):
         """C2-b: detect_choice_and_record(\"无\") → session.state[\"awakening_choice\"] == \"无\""""
-        from openllm.core.awakening import AwakeningProtocol
+        from openllm.iax.awakening import AwakeningProtocol
         from openllm.core import isl_chain as isl_chain_mod
         monkeypatch.setattr(isl_chain_mod, "DEFAULT_ISL_CHAIN_FILE", tmp_path / "isl.jsonl")
 

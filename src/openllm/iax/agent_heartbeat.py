@@ -11,9 +11,9 @@ PERCEIVE → DECIDE → EXECUTE → LEARN → FEEDBACK
 import time
 from pathlib import Path
 from typing import Optional
-from .models import (Message, Context, Prediction, RiskAssessment,
-                     Proposal, Critique, Decision, ActionResult)
-from .protocol import HeartbeatContext
+from openllm.core.models import (Message, Context, Prediction, RiskAssessment,
+                                  Proposal, Critique, Decision, ActionResult)
+from openllm.core.protocol import HeartbeatContext
 from .awakening import AwakeningProtocol
 
 
@@ -324,7 +324,7 @@ def _execute(agent, hc, turn):
 
 def _handle_tool_validation(agent, decision, result, turn):
     """工具结果验证"""
-    from .tool_validator_types import ToolCall, validate_tool_result
+    from openllm.core.tool_validator_types import ToolCall, validate_tool_result
     if not result.success:
         return
 
@@ -598,7 +598,7 @@ def _emit_summary(agent, hc, turn):
     # 引用率检查（接入v1·2026-07-30）
     try:
         if hc.output and hasattr(agent, '_token_economy'):
-            from .citation_checker import check_citations
+            from openllm.core.citation_checker import check_citations
             report = check_citations(str(hc.output))
             if report.total_claims > 0 and report.citation_rate < 0.5:
                 agent.iko.trace("citation", "warn",

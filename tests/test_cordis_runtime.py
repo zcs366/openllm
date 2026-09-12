@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from openllm.cordis.runtime import (
+from openllm.iax.cordis import (
     CoeffectContext,
     Effect,
     EffectContext,

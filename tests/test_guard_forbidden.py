@@ -91,8 +91,8 @@ class TestIsForbidden:
 
     # --- Heartbeat ontic ---
     @pytest.mark.parametrize("path", [
-        "src/openllm/core/agent_heartbeat.py",
-        "src/openllm/core/clock.py",
+        "src/openllm/iax/agent_heartbeat.py",
+        "src/openllm/iax/clock.py",
     ])
     def test_heartbeat_forbidden(self, guard: SelfModificationGuard, path: str):
         assert guard.is_forbidden(path) is True
@@ -128,7 +128,7 @@ class TestApproveChange:
         assert guard.get_modification_history("src/openllm/tools/doc_parser.py") == []
 
     def test_reject_forbidden_file(self, guard: SelfModificationGuard):
-        result = guard.approve_change("src/openllm/core/agent_heartbeat.py")
+        result = guard.approve_change("src/openllm/iax/agent_heartbeat.py")
         assert result is False
 
     def test_reject_writes_audit_trail(self, guard: SelfModificationGuard):
@@ -145,9 +145,9 @@ class TestApproveChange:
 
     def test_reject_with_custom_change_type(self, guard: SelfModificationGuard):
         guard.approve_change(
-            "src/openllm/core/agent_heartbeat.py", change_type="hotswap"
+            "src/openllm/iax/agent_heartbeat.py", change_type="hotswap"
         )
-        history = guard.get_modification_history("src/openllm/core/agent_heartbeat.py")
+        history = guard.get_modification_history("src/openllm/iax/agent_heartbeat.py")
         assert history[0]["change_type"] == "hotswap"
 
     def test_multiple_rejections_append(self, guard: SelfModificationGuard):
@@ -165,12 +165,12 @@ class TestApproveChange:
 class TestRecordModificationForbiddenIntegration:
     def test_forbidden_file_gets_alert(self, guard: SelfModificationGuard):
         guard.record_modification(
-            "src/openllm/core/agent_heartbeat.py",
+            "src/openllm/iax/agent_heartbeat.py",
             change_type="hotswap",
             agent_id="test-agent",
         )
         history = guard.get_modification_history(
-            "src/openllm/core/agent_heartbeat.py"
+            "src/openllm/iax/agent_heartbeat.py"
         )
         assert len(history) == 1
         event = history[0]
@@ -209,13 +209,13 @@ class TestRecordModificationForbiddenIntegration:
     def test_forbidden_plus_clean_content_no_intent_alert(self, guard: SelfModificationGuard):
         """Forbidden file with clean content: only forbidden alert, no intent."""
         guard.record_modification(
-            "src/openllm/core/agent_heartbeat.py",
+            "src/openllm/iax/agent_heartbeat.py",
             change_type="hotswap",
             agent_id="test-agent",
             modification_content="add heartbeat interval check",
         )
         history = guard.get_modification_history(
-            "src/openllm/core/agent_heartbeat.py"
+            "src/openllm/iax/agent_heartbeat.py"
         )
         event = history[0]
         assert event["forbidden"] is True
@@ -258,10 +258,10 @@ class TestStatePersistence:
 
         # First instance: reject a forbidden path
         g1 = SelfModificationGuard(state_path=state_path)
-        g1.approve_change("src/openllm/core/agent_heartbeat.py")
+        g1.approve_change("src/openllm/iax/agent_heartbeat.py")
 
         # Second instance: re-read from disk
         g2 = SelfModificationGuard(state_path=state_path)
-        history = g2.get_modification_history("src/openllm/core/agent_heartbeat.py")
+        history = g2.get_modification_history("src/openllm/iax/agent_heartbeat.py")
         assert len(history) == 1
         assert history[0]["forbidden"] is True

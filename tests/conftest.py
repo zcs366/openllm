@@ -18,7 +18,7 @@ def _isolate_causal_store(tmp_path, monkeypatch):
     2026-08-24 军师亲补，源自 117+2 条测试污染隔离事故。
     """
     from openllm.memory import causal_memory
-    from openllm.core import awakening
+    from openllm.iax import awakening
     from openllm.core import isl_chain as isl_chain_mod
 
     monkeypatch.setattr(

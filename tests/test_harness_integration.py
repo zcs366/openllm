@@ -77,7 +77,7 @@ def test_subagents_skills_integration():
     print("\n🧪 测试 Sub-agents + Skills 协同...")
     
     try:
-        from openllm.core.hemispheres_enhanced import (
+        from openllm.iax.hemispheres_enhanced import (
             EnhancedHemispherePair,
             ArbitrationStrategy,
             ArbitrationContext,
@@ -149,7 +149,7 @@ def test_full_integration():
     try:
         from openllm.identity.iam_integration import create_iam_integration
         from openllm.memory.unified_memory import create_unified_memory
-        from openllm.core.hemispheres_enhanced import (
+        from openllm.iax.hemispheres_enhanced import (
             EnhancedHemispherePair,
             ArbitrationStrategy,
             ArbitrationContext,

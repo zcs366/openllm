@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openllm.cordis.runtime import EffectContext
+from openllm.iax.cordis import EffectContext
 from openllm.core.brain_guardian import BrainGuardian, ChangeResult
 from openllm.governance.self_modification_guard import SelfModificationGuard
 
@@ -231,7 +231,7 @@ class TestHeartbeatMonitor:
         assert event["role"] == "left"
         assert event["action"] == "takeover"
         # 对侧脑状态应变为 FAILOVER
-        from openllm.core.hemispheres import HemisphereState
+        from openllm.iax.hemispheres import HemisphereState
         left_hemi.state = HemisphereState.FAILOVER
 
     def test_right_dead_left_takeover(self, guardian, mock_hemispheres):

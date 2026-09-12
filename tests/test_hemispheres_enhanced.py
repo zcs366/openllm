@@ -18,7 +18,7 @@ def test_enhanced_arbiter():
     print("🧪 测试 EnhancedArbiter...")
     
     try:
-        from openllm.core.hemispheres_enhanced import (
+        from openllm.iax.hemispheres_enhanced import (
             EnhancedArbiter,
             ArbitrationStrategy,
             ArbitrationContext,
@@ -103,7 +103,7 @@ def test_enhanced_hemisphere_pair():
     print("\n🧪 测试 EnhancedHemispherePair...")
     
     try:
-        from openllm.core.hemispheres_enhanced import (
+        from openllm.iax.hemispheres_enhanced import (
             EnhancedHemispherePair,
             ArbitrationStrategy,
             ArbitrationContext,
@@ -161,7 +161,7 @@ def test_quick_arbitrate():
     print("\n🧪 测试 quick_arbitrate 便捷函数...")
     
     try:
-        from openllm.core.hemispheres_enhanced import (
+        from openllm.iax.hemispheres_enhanced import (
             quick_arbitrate,
             ArbitrationStrategy,
         )

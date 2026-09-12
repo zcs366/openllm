@@ -150,7 +150,7 @@ def _make_hc(agent):
 
 def _run_learn(agent):
     """Run _learn with proper mocks."""
-    from openllm.core.agent_heartbeat import _learn
+    from openllm.iax.agent_heartbeat import _learn
     hc = _make_hc(agent)
     turn = agent.session.new_turn.return_value
     _learn(agent, hc, turn)
@@ -256,7 +256,7 @@ class TestGuardForbiddenReject:
         _guard = SelfModificationGuard(state_path=state_path)
 
         # Test the guard behavior directly with a forbidden target
-        forbidden_target = "src/openllm/core/agent_heartbeat.py"
+        forbidden_target = "src/openllm/iax/agent_heartbeat.py"
         result = _guard.approve_change(forbidden_target, change_type="causal_memory")
         assert result is False
         history = _guard.get_modification_history(forbidden_target)
@@ -335,7 +335,7 @@ class TestGuardRegression:
         assert guard.check_rate_limit("tool.py") is False  # 1 < 3
 
     def test_is_forbidden_unchanged(self, guard: SelfModificationGuard):
-        assert guard.is_forbidden("src/openllm/core/agent_heartbeat.py") is True
+        assert guard.is_forbidden("src/openllm/iax/agent_heartbeat.py") is True
         assert guard.is_forbidden("src/openllm/isn/skill_index.py") is False
 
     def test_approve_change_unchanged(self, guard: SelfModificationGuard):

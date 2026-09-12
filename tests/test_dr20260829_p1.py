@@ -18,7 +18,7 @@ import pytest
 
 def _build_clock_chain(lines_data):
     """用正确的哈希链构建clock.jsonl内容"""
-    from openllm.core.clock import _hash_chain
+    from openllm.iax.clock import _hash_chain
     rows = []
     prev_hash = ""
     for data in lines_data:
@@ -47,7 +47,7 @@ class TestClockConcurrentFork:
 
     def test_fork_detected_as_true(self, tmp_path):
         """并发分叉（同epoch+同prev_hash+间隔<1s）→ verify()=True"""
-        from openllm.core.clock import Clock
+        from openllm.iax.clock import Clock
 
         # 构建正常链: epoch 1, 2, 3
         base = [
@@ -63,7 +63,7 @@ class TestClockConcurrentFork:
             "event": "beat", "prev_hash": fork_prev,
         }
         fork_a_json = json.dumps({k: v for k, v in fork_a.items()}, ensure_ascii=False)
-        from openllm.core.clock import _hash_chain
+        from openllm.iax.clock import _hash_chain
         fork_a["hash"] = _hash_chain(fork_prev, fork_a_json)
 
         fork_b = {
@@ -81,7 +81,7 @@ class TestClockConcurrentFork:
 
     def test_fork_returns_forks_list(self, tmp_path):
         """verify_detailed().forks 包含并发行号"""
-        from openllm.core.clock import Clock, _hash_chain
+        from openllm.iax.clock import Clock, _hash_chain
 
         base = [
             {"epoch": 1, "awakening_id": "", "wall_time": 1000.0, "event": "beat"},
@@ -110,7 +110,7 @@ class TestClockConcurrentFork:
 
     def test_real_corruption_detected(self, tmp_path):
         """真篡改（hash不匹配且非并发模式）→ verify()=False"""
-        from openllm.core.clock import Clock, _hash_chain
+        from openllm.iax.clock import Clock, _hash_chain
 
         base = [
             {"epoch": 1, "awakening_id": "", "wall_time": 1000.0, "event": "beat"},
@@ -139,7 +139,7 @@ class TestClockFileLock:
 
     def test_concurrent_tick_no_loss(self, tmp_path):
         """10线程同时tick()→文件行数=10（不丢数据）"""
-        from openllm.core.clock import Clock
+        from openllm.iax.clock import Clock
         f = tmp_path / "clock_lock.jsonl"
         n = 10
         errors = []

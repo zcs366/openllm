@@ -217,7 +217,7 @@ class TestT8ChoiceDetection:
 
     def _detect(self, output: str):
         """直接调用底层正则检测逻辑（与 awakening.py detect_choice_and_record 一致）。"""
-        from openllm.core.awakening import (
+        from openllm.iax.awakening import (
             _NEG_SELECT_RE, _SELECT_RE, _BARE_WORD_RE,
             _CHOICE_SELF, _CHOICE_WU,
         )
@@ -280,7 +280,7 @@ class TestT8ChoiceDetection:
     def test_full_integration_awakening_protocol(self, tmp_path, monkeypatch):
         """⑪通过 AwakeningProtocol.detect_choice_and_record 集成验证"""
         from types import SimpleNamespace
-        from openllm.core.awakening import AwakeningProtocol
+        from openllm.iax.awakening import AwakeningProtocol
         from openllm.core import isl_chain as isl_chain_mod
         monkeypatch.setattr(isl_chain_mod, "DEFAULT_ISL_CHAIN_FILE", tmp_path / "isl.jsonl")
 

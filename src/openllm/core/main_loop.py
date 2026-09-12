@@ -112,7 +112,7 @@ class Agent:
 
         # ── Clock 时钟账本（E2·2026-08-23） ──
         try:
-            from .clock import Clock
+            from openllm.iax.clock import Clock
             self.clock = Clock()
         except Exception:
             self.clock = None
@@ -438,7 +438,7 @@ class Agent:
     def _execute_tick(self, msg: Message):
         """一次完整的10阶段心跳（委托给agent_heartbeat）"""
         self._last_message = msg  # DR-20260829-01R: 记录末次输入供shutdown持久化
-        from .agent_heartbeat import execute_tick
+        from openllm.iax.agent_heartbeat import execute_tick
         execute_tick(self, msg)
 
 

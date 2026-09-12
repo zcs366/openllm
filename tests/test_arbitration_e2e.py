@@ -19,11 +19,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from openllm.core.hemispheres import (
+from openllm.iax.hemispheres import (
     ArbiterVerdict, ArbiterRecord,
     Hemisphere, HemispherePair,
 )
-from openllm.core.hemispheres_enhanced import (
+from openllm.iax.hemispheres_enhanced import (
     ArbitrationStrategy, ArbitrationContext, ArbitrationResult,
     EnhancedArbiter, EnhancedHemispherePair,
     create_enhanced_hemisphere_pair, quick_arbitrate,

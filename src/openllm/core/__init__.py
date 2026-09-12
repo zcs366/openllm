@@ -97,8 +97,8 @@ __all__ = [
 # 代谢与经济：
 #   - token_economy.py          — Token经济（资源预算）
 #   - inference_budget.py       — 推理预算管理
-#   - heartbeat.py              — 心跳监控
-#   - agent_heartbeat.py        — Agent心跳
+#   - heartbeat.py              — 心跳监控（已归位 openllm.iax/ 2026-09-12）
+#   - agent_heartbeat.py        — Agent心跳（已归位 openllm.iax/ 2026-09-12）
 #   - idle_wander.py            — 空闲游荡（自主探索）
 #   - info_metrics.py           — 信息量指标
 #   - self_harness.py           — 自体测试桩
