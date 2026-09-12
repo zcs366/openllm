@@ -241,17 +241,29 @@ class AgentShell(cmd.Cmd):
             config = self._load_config()
             providers = config.get("providers", {})
             default = config.get("default_provider", "mimo")
+            names = list(providers.keys())
             if not args:
                 print(f"\n{C.BOLD}═══ 可用模型 ═══{C.RESET}")
-                for name, p in providers.items():
+                for i, (name, p) in enumerate(providers.items(), 1):
                     mark = f"{C.GREEN} ← 当前{C.RESET}" if name == default else ""
                     model = p.get("model", "?")
-                    print(f"  {C.BOLD}{name}{C.RESET}: {model}{mark}")
-                print(f"\n  切换: /model <名称>")
+                    print(f"  {i}. {name}: {model}{mark}")
+                print(f"\n  切换: /model <编号> 或 /model <名称>")
             else:
-                name = args[0].lower()
-                if name not in providers:
-                    print(f"  {C.RED}未知 provider: {name}{C.RESET}  用 /model 查看列表")
+                target = args[0].lower()
+                name = None
+                # 1) 编号  2) provider名  3) 模型名模糊匹配
+                if target.isdigit() and 1 <= int(target) <= len(names):
+                    name = names[int(target) - 1]
+                elif target in providers:
+                    name = target
+                else:
+                    for pname, p in providers.items():
+                        if target in str(p.get("model", "")).lower():
+                            name = pname
+                            break
+                if name is None:
+                    print(f"  {C.RED}未知: {target}{C.RESET}  用 /model 查看列表")
                 else:
                     config["default_provider"] = name
                     self._save_config(config)
