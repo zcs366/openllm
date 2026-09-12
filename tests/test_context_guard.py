@@ -13,7 +13,7 @@ ContextGuard 单元测试。
 from unittest.mock import patch
 import pytest
 
-from openllm.memory.context_guard import ContextGuard, _load_identity_keywords
+from openllm.isa.context_guard import ContextGuard, _load_identity_keywords
 
 
 # ── 辅助文本 ──────────────────────────────────────────
@@ -149,7 +149,7 @@ class TestSoulDegradation:
 
     def test_load_failure_returns_empty_set(self):
         with patch(
-            "openllm.memory.context_guard._load_identity_keywords",
+            "openllm.isa.context_guard._load_identity_keywords",
             return_value=set(),
         ):
             guard = ContextGuard()

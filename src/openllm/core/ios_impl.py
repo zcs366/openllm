@@ -90,7 +90,7 @@ class IOS:
 
         # [进化] 拒绝权——被否决的proposal可申诉
         try:
-            from ..governance.rejection import RejectionMechanism, RejectionReason
+            from ..ios.rejection import RejectionMechanism, RejectionReason
             self._rejection_engine = RejectionMechanism()
             self._RejectionReason = RejectionReason
         except Exception:

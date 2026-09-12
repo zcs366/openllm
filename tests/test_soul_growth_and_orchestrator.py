@@ -34,10 +34,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # ── SC3 证据：from import 四模块真调用 ──
 from openllm.identity.soul_growth import SoulGrowthLedger, GrowthRecord  # 模块4
-from openllm.memory.consolidation_orchestrator import ConsolidationOrchestrator  # 桥梁
-from openllm.memory.context_pressure import ContextPressureMonitor  # 模块1
+from openllm.isa.consolidation_orchestrator import ConsolidationOrchestrator  # 桥梁
+from openllm.isa.context_pressure import ContextPressureMonitor  # 模块1
 from openllm.consolidation_score import ConsolidationScorer, Provenance, TrustLevel  # 模块2
-from openllm.memory.rehydration_validator import RehydrationValidator  # 模块3
+from openllm.isa.rehydration_validator import RehydrationValidator  # 模块3
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -16,7 +16,7 @@ SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from openllm.memory.viability_logger import (
+from openllm.isa.viability_logger import (
     _load_compute_viability,
     _load_read_current_weights,
     log_skill_event,
@@ -51,7 +51,7 @@ class TestLogViability:
     """log_viability 写入与健壮性。"""
 
     @patch(
-        "openllm.memory.viability_logger._load_compute_viability",
+        "openllm.isa.viability_logger._load_compute_viability",
         return_value=lambda weights=None: MOCK_V_RESULT,
     )
     def test_writes_valid_jsonl(self, _mock_loader, v_log, tmp_path):
@@ -69,7 +69,7 @@ class TestLogViability:
 
     def test_failure_returns_none_no_corruption(self, v_log):
         """compute_viability 抛异常 → 返回 None，日志文件不产生损坏行。"""
-        import openllm.memory.viability_logger as mod
+        import openllm.isa.viability_logger as mod
         original = mod._load_compute_viability
         def _broken():
             def _raise():
@@ -85,7 +85,7 @@ class TestLogViability:
         assert not v_log.exists() or v_log.read_text(encoding="utf-8").strip() == ""
 
     @patch(
-        "openllm.memory.viability_logger._load_compute_viability",
+        "openllm.isa.viability_logger._load_compute_viability",
         return_value=None,
     )
     def test_io_s_not_importable_returns_none(self, _mock_none, v_log):
@@ -96,7 +96,7 @@ class TestLogViability:
     def test_compute_viability_returns_none_returns_none(self, v_log):
         """compute_viability 函数本身返回 None → 仍写入日志（v_result=None）。"""
         with patch(
-            "openllm.memory.viability_logger._load_compute_viability",
+            "openllm.isa.viability_logger._load_compute_viability",
             return_value=lambda weights=None: None,
         ):
             record = log_viability(log_path=v_log, bus=None)
@@ -104,7 +104,7 @@ class TestLogViability:
         assert record["v_result"] is None
 
     @patch(
-        "openllm.memory.viability_logger._load_compute_viability",
+        "openllm.isa.viability_logger._load_compute_viability",
         return_value=lambda weights=None: MOCK_V_RESULT,
     )
     def test_append_only_multiple_writes(self, _mock_loader, v_log):
@@ -220,7 +220,7 @@ class TestCLI:
     """CLI 入口 subprocess 验证。"""
 
     @patch(
-        "openllm.memory.viability_logger._load_compute_viability",
+        "openllm.isa.viability_logger._load_compute_viability",
         return_value=lambda weights=None: MOCK_V_RESULT,
     )
     def test_cli_default_logs_v(self, _mock_loader, v_log, monkeypatch):
@@ -230,7 +230,7 @@ class TestCLI:
         # 改为直接调用 main() 函数验证输出逻辑
         import io
         from contextlib import redirect_stdout
-        from openllm.memory.viability_logger import main
+        from openllm.isa.viability_logger import main
         old_argv = sys.argv[:]
         sys.argv = ["viability_logger"]
         buf = io.StringIO()
@@ -243,7 +243,7 @@ class TestCLI:
         assert "V" in output, f"CLI output missing 'V': {output}"
 
     @patch(
-        "openllm.memory.viability_logger._load_compute_viability",
+        "openllm.isa.viability_logger._load_compute_viability",
         return_value=lambda weights=None: MOCK_V_RESULT,
     )
     def test_cli_read_flag(self, _mock_loader, v_log, monkeypatch):
@@ -255,7 +255,7 @@ class TestCLI:
             [
                 sys.executable,
                 "-m",
-                "openllm.memory.viability_logger",
+                "openllm.isa.viability_logger",
                 "--read",
                 "5",
             ],
@@ -283,11 +283,11 @@ class TestAdaptiveWeights:
     """log_viability 消费自适应权重的接线。"""
 
     @patch(
-        "openllm.memory.viability_logger._load_compute_viability",
+        "openllm.isa.viability_logger._load_compute_viability",
         return_value=_mock_cv_with_weights,
     )
     @patch(
-        "openllm.memory.viability_logger._load_read_current_weights",
+        "openllm.isa.viability_logger._load_read_current_weights",
         return_value=MOCK_WEIGHTS,
     )
     def test_adaptive_weights_recorded(self, _mock_w, _mock_cv, v_log):
@@ -303,11 +303,11 @@ class TestAdaptiveWeights:
         assert "weights_used" not in record
 
     @patch(
-        "openllm.memory.viability_logger._load_compute_viability",
+        "openllm.isa.viability_logger._load_compute_viability",
         return_value=_mock_cv_with_weights,
     )
     @patch(
-        "openllm.memory.viability_logger._load_read_current_weights",
+        "openllm.isa.viability_logger._load_read_current_weights",
         return_value=None,
     )
     def test_no_adaptive_weights_no_field(self, _mock_w, _mock_cv, v_log):
@@ -317,12 +317,12 @@ class TestAdaptiveWeights:
         assert "weights_used" not in record
 
     @patch(
-        "openllm.memory.viability_logger._load_compute_viability",
+        "openllm.isa.viability_logger._load_compute_viability",
         return_value=_mock_cv_with_weights,
     )
     def test_adaptive_loader_failure_zero_blocking(self, _mock_cv, v_log):
         """_load_read_current_weights 抛异常 → 无阻塞，行为与现状一致。"""
-        import openllm.memory.viability_logger as mod
+        import openllm.isa.viability_logger as mod
         original = mod._load_read_current_weights
         def _raise():
             raise RuntimeError("boom")

@@ -7,7 +7,7 @@ import multiprocessing
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from openllm.memory.mistake_ledger import MistakeLedger
+from openllm.isa.mistake_ledger import MistakeLedger
 
 
 def _writer(path, agent_id, count):

@@ -18,9 +18,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
 
-from openllm.memory.mistake_ledger import MistakeLedger
-from openllm.memory.mistake_bridge import mistake_to_causal, find_recurring_patterns
-from openllm.memory.causal_memory import CausalMemory, CausalMemoryStore, TrustLevel
+from openllm.isa.mistake_ledger import MistakeLedger
+from openllm.isa.mistake_bridge import mistake_to_causal, find_recurring_patterns
+from openllm.isa.causal_memory import CausalMemory, CausalMemoryStore, TrustLevel
 
 
 def _store_causal(store, causal: CausalMemory):

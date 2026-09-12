@@ -9,7 +9,7 @@ from typing import Optional
 
 import pytest
 
-from openllm.governance.adjudication import (
+from openllm.ios.adjudication import (
     TransmissionAdjudicator, TransmissionRequest, Verdict, PolicyRule,
     should_transmit, make_request,
 )
@@ -303,7 +303,7 @@ class TestConvenience:
 
     def test_should_transmit_singleton(self, tmp_path, monkeypatch):
         """便捷入口：单例裁决器返回 Verdict（注入 tmp log_dir 防污染家目录）。"""
-        import openllm.governance.adjudication as adj_mod
+        import openllm.ios.adjudication as adj_mod
         fresh = TransmissionAdjudicator(log_dir=tmp_path / "sgl")
         monkeypatch.setattr(adj_mod, "_default_adjudicator", fresh)
         v = should_transmit(make_req())

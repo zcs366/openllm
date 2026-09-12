@@ -28,18 +28,18 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 # ── openLLM 内部模块 ──
-from openllm.memory.capsule import (
+from openllm.isa.capsule import (
     MemoryOS,
     TextCapsule,
     DeltaCapsule,
     CAPSULE_DIR,
 )
-from openllm.memory.causal_memory import (
+from openllm.isa.causal_memory import (
     CausalMemoryStore,
     TrustLevel,
     get_causal_store,
 )
-from openllm.memory.temperature_engine import (
+from openllm.isa.temperature_engine import (
     calculate_temperature,
     temperature_state,
 )

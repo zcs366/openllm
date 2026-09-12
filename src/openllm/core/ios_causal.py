@@ -163,7 +163,7 @@ def learn_causal(ios, ctx: Context, prediction: Prediction,
     # 原因：learn_causal写到causal_memory.jsonl，没写到CausalMemoryStore。
     # 这一行桥接两个数据流。
     try:
-        from ..memory.auto_causal_writer import AutoCausalWriter
+        from ..isa.auto_causal_writer import AutoCausalWriter
         writer = AutoCausalWriter()
         writer.record(
             action=entry.get("action", ""),
@@ -183,7 +183,7 @@ def learn_causal(ios, ctx: Context, prediction: Prediction,
     _delta_mag = 0.0 if delta.prediction_match else min(1.0, len(delta.delta_summary) / 100.0)
     if _delta_mag > 0:
         try:
-            from ..memory.causal_memory import CausalMemory, get_causal_store, TrustLevel, DEFAULT_STORE_DIR
+            from ..isa.causal_memory import CausalMemory, get_causal_store, TrustLevel, DEFAULT_STORE_DIR
             _store = get_causal_store(DEFAULT_STORE_DIR)
             _store.store(
                 action_signature=entry.get("action", "")[:100],

@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 def _clean_singleton_cache(store_dir: Path):
     """从 _singleton_cache 中移除指定路径的条目，防止跨测试泄漏。"""
     try:
-        from openllm.memory.causal_memory import _singleton_cache
+        from openllm.isa.causal_memory import _singleton_cache
         key = str(store_dir.resolve())
         _singleton_cache.pop(key, None)
     except Exception:
@@ -36,8 +36,8 @@ def _clean_singleton_cache(store_dir: Path):
 def test_session_extractor_store_is_factory_singleton(tmp_path):
     """SessionCausalExtractor._get_causal_store() 应返回 get_causal_store() 同一实例。"""
     try:
-        from openllm.memory.causal_memory import get_causal_store
-        from openllm.memory.session_causal_extractor import SessionCausalExtractor
+        from openllm.isa.causal_memory import get_causal_store
+        from openllm.isa.session_causal_extractor import SessionCausalExtractor
     except ImportError as e:
         pytest.skip(f"导入失败: {e}")
 
@@ -62,8 +62,8 @@ def test_session_extractor_store_is_factory_singleton(tmp_path):
 def test_causal_provider_store_is_factory_singleton(tmp_path):
     """CausalProvider._ensure_store() 应返回 get_causal_store() 同一实例。"""
     try:
-        from openllm.memory.causal_memory import get_causal_store
-        from openllm.memory.providers.causal_provider import CausalProvider
+        from openllm.isa.causal_memory import get_causal_store
+        from openllm.isa.providers.causal_provider import CausalProvider
     except ImportError as e:
         pytest.skip(f"导入失败: {e}")
 
@@ -145,8 +145,8 @@ def test_checkpoint_manager_resolves_io_s_path(tmp_path):
 def test_extractor_lazy_load_uses_factory(tmp_path):
     """验证 SessionCausalExtractor 通过 _get_causal_store 走工厂路径。"""
     try:
-        from openllm.memory.causal_memory import get_causal_store
-        from openllm.memory.session_causal_extractor import SessionCausalExtractor
+        from openllm.isa.causal_memory import get_causal_store
+        from openllm.isa.session_causal_extractor import SessionCausalExtractor
     except ImportError as e:
         pytest.skip(f"导入失败: {e}")
 

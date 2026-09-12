@@ -156,7 +156,7 @@ class TestReadRecentSessions:
 class TestReadHotScars:
     """read_hot_scars 方法测试。"""
 
-    @patch("openllm.memory.causal_memory.get_causal_store")
+    @patch("openllm.isa.causal_memory.get_causal_store")
     def test_read_hot_scars_passthrough(self, mock_get_store: MagicMock) -> None:
         """mock get_causal_store → to_context_block 返回值透传。"""
         mock_store = MagicMock()
@@ -170,7 +170,7 @@ class TestReadHotScars:
         mock_get_store.assert_called_once_with(None)
         mock_store.to_context_block.assert_called_once_with(5)
 
-    @patch("openllm.memory.causal_memory.get_causal_store")
+    @patch("openllm.isa.causal_memory.get_causal_store")
     def test_read_hot_scars_exception_returns_empty(self, mock_get_store: MagicMock) -> None:
         """to_context_block 抛异常 → 返回 '' 不抛。"""
         mock_store = MagicMock()
@@ -182,7 +182,7 @@ class TestReadHotScars:
 
         assert result == ""
 
-    @patch("openllm.memory.causal_memory.get_causal_store")
+    @patch("openllm.isa.causal_memory.get_causal_store")
     def test_read_hot_scars_store_import_fails(self, mock_get_store: MagicMock) -> None:
         """get_causal_store 本身抛异常 → 返回 '' 不抛。"""
         mock_get_store.side_effect = ImportError("模块不存在")

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from openllm.governance.self_modification_guard import (
+from openllm.ios.self_modification_guard import (
     FORBIDDEN_PATHS,
     SelfModificationGuard,
 )

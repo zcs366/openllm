@@ -6,8 +6,8 @@ import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from openllm.memory.mistake_ledger import MistakeLedger
-from openllm.memory.mistake_bridge import mistake_to_causal, find_recurring_patterns
+from openllm.isa.mistake_ledger import MistakeLedger
+from openllm.isa.mistake_bridge import mistake_to_causal, find_recurring_patterns
 
 
 def test_mistake_to_causal():

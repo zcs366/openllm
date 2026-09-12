@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from openllm.memory.temperature_engine import (
+from openllm.isa.temperature_engine import (
     calculate_temperature,
     temperature_state,
     temperature_state_emoji,

@@ -63,10 +63,10 @@ class ConsolidationOrchestrator:
             min_score: 固化分数门槛
         """
         # ── 延迟导入：确保各模块在运行时可用 ──
-        from openllm.memory.context_pressure import ContextPressureMonitor
+        from openllm.isa.context_pressure import ContextPressureMonitor
         from openllm.consolidation_score import ConsolidationScorer
         from openllm.identity.soul_growth import SoulGrowthLedger
-        from openllm.memory.rehydration_validator import RehydrationValidator
+        from openllm.isa.rehydration_validator import RehydrationValidator
 
         self._pressure = ContextPressureMonitor(state_path=pressure_state_path)
         self._scorer = ConsolidationScorer(

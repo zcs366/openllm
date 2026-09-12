@@ -235,14 +235,14 @@ class PulseEngine:
         """接 P0-1 TransmissionAdjudicator：该不该现在打扰。"""
         if self._adjudicator is None:
             try:
-                from openllm.governance.adjudication import (
+                from openllm.ios.adjudication import (
                     TransmissionAdjudicator, TransmissionRequest,
                 )
                 self._adjudicator = TransmissionAdjudicator(
                     log_dir=self._log_dir / "adjudication")
             except ImportError:
                 return None  # 裁决器不可用 → 不投递（fail closed，振动是打扰）
-        from openllm.governance.adjudication import TransmissionRequest
+        from openllm.ios.adjudication import TransmissionRequest
         req = TransmissionRequest(
             from_agent="军师", to_agent=pulse.recipient,
             msg_type="wake", body=pulse.message,

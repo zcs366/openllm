@@ -123,9 +123,9 @@ def _make_agent():
     agent._budget_manager = MagicMock()
 
     # Mock evidence replay to avoid import
-    mock_evidence = types.ModuleType("openllm.memory.evidence_replay")
+    mock_evidence = types.ModuleType("openllm.isa.evidence_replay")
     mock_evidence.create_replay_for_context = MagicMock(return_value=None)
-    sys.modules["openllm.memory.evidence_replay"] = mock_evidence
+    sys.modules["openllm.isa.evidence_replay"] = mock_evidence
 
     return agent
 

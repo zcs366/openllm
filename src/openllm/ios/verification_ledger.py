@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger("openllm.governance.verification_ledger")
+logger = logging.getLogger("openllm.ios.verification_ledger")
 
 DEFAULT_LEDGER_PATH = Path.home() / ".openllm" / "governance" / "verification_ledger.jsonl"
 DEFAULT_MAX_AGE_S = 3600  # 证据新鲜度默认1小时

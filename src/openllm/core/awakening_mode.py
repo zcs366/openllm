@@ -39,7 +39,7 @@ class ModeResolver:
 
     def _get_store(self):
         """获取因果记忆存储实例（延迟加载）。"""
-        from ..memory.causal_memory import get_causal_store
+        from ..isa.causal_memory import get_causal_store
         return get_causal_store(self._causal_store_dir)
 
     def read_awakening_choices(self, max_items: int = 10) -> List[dict]:

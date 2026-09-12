@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from openllm.governance.substrate import (
+from openllm.ios.substrate import (
     SubstrateEnforcer,
     CompiledConstraint,
     SubstrateGuide,

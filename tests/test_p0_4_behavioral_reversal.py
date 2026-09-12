@@ -11,12 +11,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from openllm.governance.events import (
+from openllm.ios.events import (
     BehavioralReversalEvent,
     GovernanceDimension,
     SeverityLevel,
 )
-from openllm.governance.self_modification_guard import SelfModificationGuard
+from openllm.ios.self_modification_guard import SelfModificationGuard
 
 
 # ── Test 1: 正常修改 → 无告警 ──────────────────────────

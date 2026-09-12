@@ -7,13 +7,13 @@ signal_bus → V → selection_gate → 技能生死 链路的一周观测仪表
 
 用法:
     # 记录一次V值
-    python -m openllm.memory.viability_logger
+    python -m openllm.isa.viability_logger
 
     # 读最后N条V值日志
-    python -m openllm.memory.viability_logger --read 20
+    python -m openllm.isa.viability_logger --read 20
 
     # 编程调用
-    from openllm.memory.viability_logger import log_viability, log_skill_event, read_log
+    from openllm.isa.viability_logger import log_viability, log_skill_event, read_log
     log_viability()
     log_skill_event("adopted", "search-pipeline")
 """

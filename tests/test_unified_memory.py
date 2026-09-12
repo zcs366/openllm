@@ -18,7 +18,7 @@ def test_unified_memory():
     print("🧪 测试 UnifiedMemory...")
     
     try:
-        from openllm.memory.unified_memory import UnifiedMemory, create_unified_memory
+        from openllm.isa.unified_memory import UnifiedMemory, create_unified_memory
         
         # 测试1: 创建实例
         print("\n1. 创建 UnifiedMemory 实例...")
@@ -123,7 +123,7 @@ def test_quick_functions():
     print("\n🧪 测试便捷函数...")
     
     try:
-        from openllm.memory.unified_memory import quick_store, quick_retrieve
+        from openllm.isa.unified_memory import quick_store, quick_retrieve
         
         # 测试快速存储
         print("\n1. 测试快速存储...")
@@ -173,7 +173,7 @@ if __name__ == "__main__":
         sys.exit(1)
 def test_four_question_metadata():
     """测试四问元数据"""
-    from src.openllm.memory.unified_memory import UnifiedMemory, MemoryEntry
+    from src.openllm.isa.unified_memory import UnifiedMemory, MemoryEntry
     mem = UnifiedMemory()
     
     # 存储带四问元数据的记忆
@@ -206,7 +206,7 @@ def test_four_question_metadata():
 
 def test_enhanced_temperature():
     """测试增强版温度函数：动态λ+酒神双杯"""
-    from src.openllm.memory.unified_memory import MemoryEntry
+    from src.openllm.isa.unified_memory import MemoryEntry
     import time
     
     # 测试1：不同标签的λ不同

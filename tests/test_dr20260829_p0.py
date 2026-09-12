@@ -23,14 +23,14 @@ class TestDeltaCapsuleEncoding:
 
     def test_hash_fallback_384dim(self):
         """2a: hash fallback路径产出384维向量"""
-        from openllm.memory.capsule import DeltaCapsule, CAPSULE_DIM
+        from openllm.isa.capsule import DeltaCapsule, CAPSULE_DIM
         # 强制走hash fallback: 使openllm_memory和EmbeddingEngine都不可用
         with patch.dict('sys.modules', {
             'openllm_memory': None,
             'openllm.embedding': None,
         }):
             # Reset the module-level singleton to force re-creation
-            import openllm.memory.capsule as cap_mod
+            import openllm.isa.capsule as cap_mod
             old_engine = cap_mod._EMBEDDING_ENGINE
             cap_mod._EMBEDDING_ENGINE = None
             try:
@@ -45,12 +45,12 @@ class TestDeltaCapsuleEncoding:
 
     def test_hash_fallback_deterministic(self):
         """相同输入产出相同向量"""
-        from openllm.memory.capsule import DeltaCapsule
+        from openllm.isa.capsule import DeltaCapsule
         with patch.dict('sys.modules', {
             'openllm_memory': None,
             'openllm.embedding': None,
         }):
-            import openllm.memory.capsule as cap_mod
+            import openllm.isa.capsule as cap_mod
             old_engine = cap_mod._EMBEDDING_ENGINE
             cap_mod._EMBEDDING_ENGINE = None
             try:
@@ -62,12 +62,12 @@ class TestDeltaCapsuleEncoding:
 
     def test_vector_not_all_zeros(self):
         """向量不全为零"""
-        from openllm.memory.capsule import DeltaCapsule
+        from openllm.isa.capsule import DeltaCapsule
         with patch.dict('sys.modules', {
             'openllm_memory': None,
             'openllm.embedding': None,
         }):
-            import openllm.memory.capsule as cap_mod
+            import openllm.isa.capsule as cap_mod
             old_engine = cap_mod._EMBEDDING_ENGINE
             cap_mod._EMBEDDING_ENGINE = None
             try:
@@ -86,9 +86,9 @@ class TestDeltaCapsuleShapeWarning:
 
     def test_shape_mismatch_warns_and_zeros(self):
         """2b: 形状不符产生warning日志"""
-        from openllm.memory.capsule import DeltaCapsule, CAPSULE_DIM
+        from openllm.isa.capsule import DeltaCapsule, CAPSULE_DIM
         bad_vector = np.ones(100, dtype=np.float32)  # 错误维度
-        with patch("openllm.memory.capsule._logger") as mock_logger:
+        with patch("openllm.isa.capsule._logger") as mock_logger:
             dc = DeltaCapsule(session_id="bad", vector=bad_vector)
             # 应该有warning调用
             mock_logger.warning.assert_called_once()
@@ -107,7 +107,7 @@ class TestSessionPersistence:
 
     def test_shutdown_persists_capsules(self):
         """2c: 有turn的session在shutdown后产生v06/v07文件"""
-        from openllm.memory.capsule import TextCapsule, DeltaCapsule, MemoryOS, CAPSULE_DIM
+        from openllm.isa.capsule import TextCapsule, DeltaCapsule, MemoryOS, CAPSULE_DIM
 
         with tempfile.TemporaryDirectory() as tmpdir:
             caps_dir = Path(tmpdir)
@@ -124,7 +124,7 @@ class TestSessionPersistence:
                 'openllm_memory': None,
                 'openllm.embedding': None,
             }):
-                import openllm.memory.capsule as cap_mod
+                import openllm.isa.capsule as cap_mod
                 old_engine = cap_mod._EMBEDDING_ENGINE
                 cap_mod._EMBEDDING_ENGINE = None
                 try:

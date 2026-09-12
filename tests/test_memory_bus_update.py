@@ -15,8 +15,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from openllm.memory.memory_bus import MemoryBus
-from openllm.memory import jiak_lifecycle as jl
+from openllm.isa.memory_bus import MemoryBus
+from openllm.isa import jiak_lifecycle as jl
 
 CARDS_DIR = Path.home() / ".hermes" / "jiak" / "cards"
 

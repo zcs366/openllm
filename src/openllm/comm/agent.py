@@ -344,7 +344,7 @@ class CommAgent:
     def _ensure_adjudicator(self):
         if self._adjudicator is None:
             try:
-                from openllm.governance.adjudication import TransmissionAdjudicator
+                from openllm.ios.adjudication import TransmissionAdjudicator
                 self._adjudicator = TransmissionAdjudicator(
                     log_dir=self._log_dir / "adjudication")
             except ImportError:
@@ -355,7 +355,7 @@ class CommAgent:
         adj = self._ensure_adjudicator()
         if adj is None:
             return None
-        from openllm.governance.adjudication import TransmissionRequest
+        from openllm.ios.adjudication import TransmissionRequest
         return adj.decide(TransmissionRequest(
             from_agent=self.agent_id, to_agent=msg.to_id, msg_type="comm." + msg.kind,
             body=msg.body, importance=msg.importance, urgency=msg.urgency,
@@ -366,7 +366,7 @@ class CommAgent:
         adj = self._ensure_adjudicator()
         if adj is None:
             return None
-        from openllm.governance.adjudication import TransmissionRequest
+        from openllm.ios.adjudication import TransmissionRequest
         return adj.decide(TransmissionRequest(
             from_agent=msg.from_id, to_agent=self.agent_id, msg_type="comm.deliver",
             body=msg.body, importance=msg.importance, channel="internal"))

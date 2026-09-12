@@ -38,7 +38,7 @@ from .events import (
 )
 from .audit import AuditChain
 
-logger = logging.getLogger("openllm.governance.engine")
+logger = logging.getLogger("openllm.ios.engine")
 
 
 # ── 投票权重（2026-07-03 用户确认） ──

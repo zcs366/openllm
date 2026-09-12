@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from openllm.comm import Registry, CommAgent
 from openllm.iai.session import SessionManager, SessionStatus
 from openllm.iai.event_bus import EventBus
-from openllm.governance.adjudication import TransmissionAdjudicator
+from openllm.ios.adjudication import TransmissionAdjudicator
 
 
 def banner(title: str) -> None:

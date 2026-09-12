@@ -5,7 +5,7 @@ execution_recorder.py — 工具执行记录器（CCL执行节点）
 通过subprocess调用recall_append.py写入，失败绝不阻塞工具执行。
 
 用法：
-    from openllm.memory.execution_recorder import record_execution
+    from openllm.isa.execution_recorder import record_execution
     record_execution("read_file", {"path": "/tmp/test"}, status="ok",
                      duration_ms=12.5, result_summary="文件内容...")
 """

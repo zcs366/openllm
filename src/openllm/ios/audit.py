@@ -20,7 +20,7 @@ from typing import Optional
 
 from .events import GovernanceEvent, GovernanceDimension, CounterfactualEvent
 
-logger = logging.getLogger("openllm.governance.audit")
+logger = logging.getLogger("openllm.ios.audit")
 
 # ── 默认路径 ──
 DEFAULT_AUDIT_DIR = Path.home() / ".hermes" / "jiak" / "governance_audit"

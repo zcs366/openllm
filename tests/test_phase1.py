@@ -203,7 +203,7 @@ class TestOpenLLMEngine:
         """两次wake→sleep→wake：记忆恢复。"""
         with tempfile.TemporaryDirectory() as tmp:
             # Session 1: 写入一些有意义的内容
-            from openllm.memory.capsule import MemoryOS, TextCapsule, DeltaCapsule
+            from openllm.isa.capsule import MemoryOS, TextCapsule, DeltaCapsule
             mos = MemoryOS(Path(tmp))
             text = TextCapsule(
                 session_id="s1",

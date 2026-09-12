@@ -11,8 +11,8 @@ import sys, os
 sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
 
 from openllm.constitution import check_constitution, CONSTITUTION, is_blocked
-from openllm.governance.feedback_loop import FeedbackLoop
-from openllm.governance.supervision_matrix import SupervisionMatrix
+from openllm.ios.feedback_loop import FeedbackLoop
+from openllm.ios.supervision_matrix import SupervisionMatrix
 
 # ═══════════════════════════════════════════════════════
 # 演示用Agent（最小实现）

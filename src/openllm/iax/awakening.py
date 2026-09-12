@@ -173,7 +173,7 @@ class AwakeningProtocol:
             session: 当前会话（用于提取session_id）
         """
         try:
-            from ..memory.causal_memory import get_causal_store
+            from ..isa.causal_memory import get_causal_store
 
             store_dir = self._causal_store_dir or DEFAULT_AWAKENING_STORE_DIR
             store = get_causal_store(store_dir)

@@ -1,4 +1,4 @@
-"""OpenLLM Memory — 记忆操作系统 + 统一记忆系统 + MemoryBus总线。"""
+"""OpenLLM ISA — 记忆器官（统一记忆系统 + MemoryBus总线 + Δ胶囊）。"""
 from .capsule import MemoryOS, TextCapsule, DeltaCapsule, MemoryLayers, Arbitrator, Checkpoint
 from .unified_memory import UnifiedMemory, create_unified_memory
 from .evidence_replay import EvidenceReplay, EvidenceSpan, ReplayResult, create_replay_for_context

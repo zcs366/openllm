@@ -188,7 +188,7 @@ class G2MemoryHarness(BaseHarness):
         memory_context = ""
         if bus is not None:
             try:
-                from openllm.memory.memory_bus import Query
+                from openllm.isa.memory_bus import Query
                 query = Query(text=task_prompt, top_k=3, token_budget=500)
                 records = bus.query(query)
                 if records:
@@ -226,7 +226,7 @@ class G2MemoryHarness(BaseHarness):
         # ── 任务后：写入教训 ──
         if bus is not None:
             try:
-                from openllm.memory.memory_bus import WriteRequest
+                from openllm.isa.memory_bus import WriteRequest
                 final = messages[-1]["content"] if messages else response
                 lesson = f"任务: {task_prompt[:60]}... → 回答: {final[:120]}"
                 wr = WriteRequest(
@@ -296,7 +296,7 @@ class G3FullHarness(BaseHarness):
         if bus is not None:
             # 常规记忆（按 temperature 降序）
             try:
-                from openllm.memory.memory_bus import Query
+                from openllm.isa.memory_bus import Query
                 query = Query(text=task_prompt, top_k=5, token_budget=800)
                 records = bus.query(query)
                 # 按 temperature 降序排序（高温度优先）
@@ -311,8 +311,8 @@ class G3FullHarness(BaseHarness):
 
             # 因果记忆（CausalProvider 独立检索）
             try:
-                from openllm.memory.providers.causal_provider import CausalProvider
-                from openllm.memory.memory_bus import Query as Q2
+                from openllm.isa.providers.causal_provider import CausalProvider
+                from openllm.isa.memory_bus import Query as Q2
                 causal_prov = CausalProvider()
                 causal_query = Q2(text=task_prompt, top_k=3, token_budget=300)
                 causal_records = causal_prov.search(causal_query)
@@ -359,7 +359,7 @@ class G3FullHarness(BaseHarness):
         # ── 任务后：写入教训 + 因果记录 ──
         if bus is not None:
             try:
-                from openllm.memory.memory_bus import WriteRequest
+                from openllm.isa.memory_bus import WriteRequest
                 final = messages[-1]["content"] if messages else response
                 lesson = f"任务: {task_prompt[:60]}... → 回答: {final[:120]}"
                 wr = WriteRequest(

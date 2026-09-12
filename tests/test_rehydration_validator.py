@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from openllm.memory.rehydration_validator import (
+from openllm.isa.rehydration_validator import (
     RehydrationValidator,
     ValidationResult,
     _tfidf_cosine,

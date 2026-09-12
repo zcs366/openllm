@@ -20,7 +20,7 @@ import pytest
 
 class TestCapsuleRecency:
     def test_read_picks_newest_by_timestamp_not_filename(self):
-        from openllm.memory.capsule import MemoryOS, TextCapsule
+        from openllm.isa.capsule import MemoryOS, TextCapsule
 
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
@@ -46,7 +46,7 @@ class TestCapsuleRecency:
 
     def test_read_with_explicit_session_id(self):
         """session_id 参数以前被完全无视，现在必须精确读取。"""
-        from openllm.memory.capsule import MemoryOS, TextCapsule
+        from openllm.isa.capsule import MemoryOS, TextCapsule
 
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)

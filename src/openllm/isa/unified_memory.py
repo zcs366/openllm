@@ -12,7 +12,7 @@
 - 温度衰减函数：T = imp × e^(-λt) + heat
 
 用法：
-    from openllm.memory.unified_memory import UnifiedMemory
+    from openllm.isa.unified_memory import UnifiedMemory
     
     memory = UnifiedMemory()
     

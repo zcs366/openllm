@@ -28,7 +28,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def _cheap_delta(monkeypatch):
     """接骨测试不测嵌入：Δ向量走固定向量，免得每条测试加载 sentence-transformers。"""
-    from openllm.memory import capsule as cap
+    from openllm.isa import capsule as cap
 
     def _fast(cls, session_id, text):
         return cls(session_id=session_id,
@@ -61,7 +61,7 @@ def _engine(tmp, name="OpenLLM"):
 
 def _seed_capsule(caps_dir, session_id, insights=None, ts=None):
     """在库里预置一个胶囊（模拟上一次生命留下的账本）。"""
-    from openllm.memory.capsule import TextCapsule
+    from openllm.isa.capsule import TextCapsule
     cap = TextCapsule(session_id=session_id,
                       timestamp=ts if ts is not None else time.time() - 100,
                       insights=list(insights or []))

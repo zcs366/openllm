@@ -11,7 +11,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-logger = logging.getLogger("openllm.governance.consensus_reasoning")
+logger = logging.getLogger("openllm.ios.consensus_reasoning")
 _STATE_PATH = Path.home() / ".hermes" / "governance" / "consensus_reasoning_state.json"
 DEFAULT_CONSENSUS_THRESHOLD = 0.6
 _ROLE_PROFILES: dict[str, tuple[str, float]] = {

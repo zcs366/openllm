@@ -8,11 +8,11 @@ import pytest
 from types import SimpleNamespace
 from pathlib import Path
 
-from openllm.memory.causal_memory import CausalMemoryStore, get_causal_store
+from openllm.isa.causal_memory import CausalMemoryStore, get_causal_store
 
 
 def _clear_singleton_cache():
-    from openllm.memory.causal_memory import _singleton_cache
+    from openllm.isa.causal_memory import _singleton_cache
     _singleton_cache.clear()
 
 

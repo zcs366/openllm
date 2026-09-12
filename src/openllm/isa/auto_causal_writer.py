@@ -5,7 +5,7 @@ AutoCausalWriter — 自动因果记忆写入器
 让因果记忆的数据流自动灌入，不再"管线通了但没水"。
 
 用法:
-    from openllm.memory.auto_causal_writer import AutoCausalWriter
+    from openllm.isa.auto_causal_writer import AutoCausalWriter
     
     writer = AutoCausalWriter()
     writer.record(

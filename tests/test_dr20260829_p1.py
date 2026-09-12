@@ -182,7 +182,7 @@ class TestCausalQuality:
 
     def test_zero_info_lesson_not_filtered_in_writer(self, tmp_path):
         """AutoCausalWriter仍写入所有记录（过滤在ios_causal层）"""
-        from openllm.memory.auto_causal_writer import AutoCausalWriter
+        from openllm.isa.auto_causal_writer import AutoCausalWriter
         writer = AutoCausalWriter(store_dir=tmp_path / "causal_test")
 
         writer.record(
@@ -222,7 +222,7 @@ class TestCausalQuality:
 
     def test_failure_goes_to_store(self, tmp_path):
         """失败记录(delta>0)→正常进store"""
-        from openllm.memory.auto_causal_writer import AutoCausalWriter
+        from openllm.isa.auto_causal_writer import AutoCausalWriter
         writer = AutoCausalWriter(store_dir=tmp_path / "causal_test")
 
         writer.record(

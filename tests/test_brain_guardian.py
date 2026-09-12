@@ -18,7 +18,7 @@ import pytest
 
 from openllm.iax.cordis import EffectContext
 from openllm.core.brain_guardian import BrainGuardian, ChangeResult
-from openllm.governance.self_modification_guard import SelfModificationGuard
+from openllm.ios.self_modification_guard import SelfModificationGuard
 
 
 # ── Fixtures ──────────────────────────────────────────────

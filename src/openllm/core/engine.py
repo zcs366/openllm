@@ -23,7 +23,7 @@ from .provider import (
     DeepSeekProvider, ModelConfig, Message, ModelResponse,
     create_provider, DEFAULT_PROVIDER,
 )
-from ..memory.capsule import (
+from ..isa.capsule import (
     MemoryOS, TextCapsule, DeltaCapsule, Arbitrator,
 )
 from ..identity.soul import (
@@ -942,7 +942,7 @@ class OpenLLMEngine:
         # ── 因果记忆自动写入（即使没有工具调用也记录）──
         # 解决AutoCausalWriter只在工具执行后触发的问题
         try:
-            from ..memory.auto_causal_writer import AutoCausalWriter
+            from ..isa.auto_causal_writer import AutoCausalWriter
             writer = AutoCausalWriter()
             # 提取原始用户问题（去掉记忆前缀）
             raw_question = user_input
@@ -968,7 +968,7 @@ class OpenLLMEngine:
         self._chat_round_counter += 1
         if self._chat_round_counter % 5 == 0:
             try:
-                from ..memory.session_causal_extractor import SessionCausalExtractor
+                from ..isa.session_causal_extractor import SessionCausalExtractor
                 extractor = SessionCausalExtractor()
                 # 获取当前会话ID
                 # 2026-09-10接骨：用引擎的会话标识，别再自己编 "chat_N"

@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
 
-from openllm.governance.self_modification_guard import (
+from openllm.ios.self_modification_guard import (
     SelfModificationGuard,
 )
 
@@ -174,7 +174,7 @@ class TestGuardActivated:
 
         # Patch SelfModificationGuard class at the source module level
         with patch(
-            "openllm.governance.self_modification_guard.SelfModificationGuard",
+            "openllm.ios.self_modification_guard.SelfModificationGuard",
             return_value=_guard,
         ):
             _run_learn(mock_agent)
@@ -193,7 +193,7 @@ class TestGuardActivated:
         before = time.time()
 
         with patch(
-            "openllm.governance.self_modification_guard.SelfModificationGuard",
+            "openllm.ios.self_modification_guard.SelfModificationGuard",
             return_value=_guard,
         ):
             _run_learn(mock_agent)
@@ -227,7 +227,7 @@ class TestGuardRateLimitSkip:
         _guard.record_modification(_causal_target, "causal_memory", "test-agent")
 
         with patch(
-            "openllm.governance.self_modification_guard.SelfModificationGuard",
+            "openllm.ios.self_modification_guard.SelfModificationGuard",
             return_value=_guard,
         ):
             _run_learn(mock_agent)
@@ -293,7 +293,7 @@ class TestGuardNonBlocking:
     ):
         """If SelfModificationGuard import fails, heartbeat still runs."""
         with patch(
-            "openllm.governance.self_modification_guard.SelfModificationGuard",
+            "openllm.ios.self_modification_guard.SelfModificationGuard",
             side_effect=ImportError("guard unavailable"),
         ):
             _run_learn(mock_agent)
@@ -310,7 +310,7 @@ class TestGuardNonBlocking:
         _guard.check_rate_limit = MagicMock(side_effect=RuntimeError("check failed"))
 
         with patch(
-            "openllm.governance.self_modification_guard.SelfModificationGuard",
+            "openllm.ios.self_modification_guard.SelfModificationGuard",
             return_value=_guard,
         ):
             _run_learn(mock_agent)

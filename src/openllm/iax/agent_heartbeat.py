@@ -193,7 +193,7 @@ def _do_search(agent, msg, ctx, hc, turn):
 def _do_replay(agent, msg, ctx, hc, turn):
     """证据回放"""
     try:
-        from ..memory.evidence_replay import create_replay_for_context
+        from ..isa.evidence_replay import create_replay_for_context
         replay_text = create_replay_for_context(msg.text, ctx, top_k=5, max_tokens=512)
         if replay_text:
             ctx.search_results = getattr(ctx, 'search_results', []) or []
@@ -383,7 +383,7 @@ def _learn(agent, hc, turn):
     _causal_target = str(Path.home() / ".openllm" / "output" / "ios" / "causal_memory.jsonl")
     _guard_skipped = False
     try:
-        from ..governance.self_modification_guard import SelfModificationGuard
+        from ..ios.self_modification_guard import SelfModificationGuard
         _guard = SelfModificationGuard()
         # 写入前：频率限制 + 禁区检查
         if _guard.check_rate_limit(_causal_target):

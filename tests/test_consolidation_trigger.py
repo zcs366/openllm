@@ -31,7 +31,7 @@ from unittest.mock import MagicMock, patch, call
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # ── CT1: import 可用 ──
-from openllm.memory.consolidation_trigger import ConsolidationTrigger
+from openllm.isa.consolidation_trigger import ConsolidationTrigger
 
 
 class TestImportExists(unittest.TestCase):
@@ -131,13 +131,13 @@ class TestIntegrationCautionGrowthWrite(unittest.TestCase):
     """CT3: 真实组件闭环——caution水位 + scorer有候选 → growth.jsonl真新增。"""
 
     def test_real_components(self):
-        from openllm.memory.context_pressure import ContextPressureMonitor
+        from openllm.isa.context_pressure import ContextPressureMonitor
         from openllm.consolidation_score import (
             ConsolidationScorer,
             Provenance,
             TrustLevel,
         )
-        from openllm.memory.consolidation_orchestrator import (
+        from openllm.isa.consolidation_orchestrator import (
             ConsolidationOrchestrator,
         )
         from openllm.identity.soul_growth import SoulGrowthLedger
@@ -230,7 +230,7 @@ class TestLazyInit(unittest.TestCase):
         self.assertIsNone(trigger._pressure)
 
         # mock 压力监控器创建后的返回
-        with patch("openllm.memory.context_pressure.ContextPressureMonitor") as MockPM:
+        with patch("openllm.isa.context_pressure.ContextPressureMonitor") as MockPM:
             mock_pm = MagicMock()
             mock_pm.should_compress.return_value = (False, "")
             mock_pm.get_pressure_level.return_value = "normal"

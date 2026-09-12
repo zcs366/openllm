@@ -102,7 +102,7 @@ class TestReliableSession:
 class TestAdjudication:
     def test_send_blocked_by_blacklist(self, tmp_path):
         """裁决 BLOCK：黑名单禁止 A→B → send 拒绝。"""
-        from openllm.governance.adjudication import TransmissionAdjudicator
+        from openllm.ios.adjudication import TransmissionAdjudicator
         adj = TransmissionAdjudicator(log_dir=tmp_path / "adj")
         adj.block_pair("IAI", "ISN")
         sessions = SessionManager(sessions_dir=tmp_path / "sessions")

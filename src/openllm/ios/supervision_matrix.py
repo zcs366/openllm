@@ -5,7 +5,7 @@
 核心监督者固定，辅助监督者六轮轮值。
 
 用法：
-    from openllm.governance.supervision_matrix import SupervisionMatrix
+    from openllm.ios.supervision_matrix import SupervisionMatrix
     sm = SupervisionMatrix()
     supervisor = sm.get_supervisor("IAX", round_number=1)
 """

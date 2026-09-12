@@ -24,7 +24,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger("openllm.governance.stateful_audit")
+logger = logging.getLogger("openllm.ios.stateful_audit")
 
 
 @dataclass

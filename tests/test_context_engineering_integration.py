@@ -25,13 +25,13 @@ from openllm.compaction_control import (
     estimate_tokens,
 )
 from openllm.message import Message
-from openllm.memory.context_pressure import (
+from openllm.isa.context_pressure import (
     ContextPressureMonitor,
     THRESHOLD_CAUTION,
     THRESHOLD_CRITICAL,
 )
 from openllm.core.context_drift_detector import ContextDriftDetector
-from openllm.memory.unified_memory import UnifiedMemory, MemoryEntry
+from openllm.isa.unified_memory import UnifiedMemory, MemoryEntry
 from openllm.isn.tool_registry_bridge import (
     ToolConfig,
     ToolRegistryBridge,

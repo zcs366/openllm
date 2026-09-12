@@ -259,9 +259,9 @@ def _make_mock_agent():
         })
 
     # Mock evidence replay
-    mock_evidence = types.ModuleType("openllm.memory.evidence_replay")
+    mock_evidence = types.ModuleType("openllm.isa.evidence_replay")
     mock_evidence.create_replay_for_context = MagicMock(return_value=None)
-    sys.modules["openllm.memory.evidence_replay"] = mock_evidence
+    sys.modules["openllm.isa.evidence_replay"] = mock_evidence
 
     return agent
 

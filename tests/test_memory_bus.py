@@ -20,11 +20,11 @@ from pathlib import Path
 # 添加项目路径
 sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
 
-from openllm.memory.memory_bus import (
+from openllm.isa.memory_bus import (
     MemoryBus, MemoryRecord, WriteRequest, WriteResult, Query,
     estimate_tokens
 )
-from openllm.memory.providers import JiakProvider, RecallProvider, CausalProvider, UnifiedProvider
+from openllm.isa.providers import JiakProvider, RecallProvider, CausalProvider, UnifiedProvider
 
 
 # ═══════════════════════════════════════════════
@@ -380,7 +380,7 @@ if __name__ == "__main__":
 
 def test_calc_temperature():
     """测试增强温度计算函数"""
-    from src.openllm.memory.memory_bus import calc_temperature
+    from src.openllm.isa.memory_bus import calc_temperature
     import time
     
     now = time.time()
@@ -411,7 +411,7 @@ def test_calc_temperature():
 
 def test_hybrid_rerank():
     """测试混合重排功能"""
-    from src.openllm.memory.memory_bus import MemoryBus, Query, MemoryRecord
+    from src.openllm.isa.memory_bus import MemoryBus, Query, MemoryRecord
     import time
     
     bus = MemoryBus()

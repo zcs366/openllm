@@ -7,7 +7,7 @@ import time
 import tempfile
 import unittest
 
-from openllm.governance.engine import SuspicionCascade, SuspicionEntry
+from openllm.ios.engine import SuspicionCascade, SuspicionEntry
 
 
 class TestNewtonCooling(unittest.TestCase):

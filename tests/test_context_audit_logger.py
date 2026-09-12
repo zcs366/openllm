@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from openllm.memory.context_audit_logger import ContextAuditLogger
+from openllm.isa.context_audit_logger import ContextAuditLogger
 
 
 @pytest.fixture

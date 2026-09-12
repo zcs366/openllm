@@ -21,7 +21,7 @@ def test_prompt_memory_integration():
     
     try:
         from openllm.identity.iam_integration import create_iam_integration
-        from openllm.memory.unified_memory import create_unified_memory
+        from openllm.isa.unified_memory import create_unified_memory
         
         # 创建实例
         iam = create_iam_integration()
@@ -148,7 +148,7 @@ def test_full_integration():
     
     try:
         from openllm.identity.iam_integration import create_iam_integration
-        from openllm.memory.unified_memory import create_unified_memory
+        from openllm.isa.unified_memory import create_unified_memory
         from openllm.iax.hemispheres_enhanced import (
             EnhancedHemispherePair,
             ArbitrationStrategy,

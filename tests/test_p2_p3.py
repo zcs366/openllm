@@ -5,9 +5,9 @@ Tests for Pipeline + Checkpoint + Sovereignty — P2/P3模块测试
 import pytest
 from openllm.pipeline import MessageQueue
 from openllm.protocol import Protocol, MessageType, BodyName
-from openllm.governance.checkpoint import ConstitutionalCheckpoint
-from openllm.governance.sovereignty import SovereigntyDeclaration, ProposalStatus
-from openllm.governance.precedent_log import PrecedentLog, ConflictType
+from openllm.ios.checkpoint import ConstitutionalCheckpoint
+from openllm.ios.sovereignty import SovereigntyDeclaration, ProposalStatus
+from openllm.ios.precedent_log import PrecedentLog, ConflictType
 
 
 class TestMessageQueue:

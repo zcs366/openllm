@@ -9,7 +9,7 @@ import time
 # 添加项目路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from openllm.memory.mistake_ledger import MistakeLedger
+from openllm.isa.mistake_ledger import MistakeLedger
 
 
 def test_append_creates_record():

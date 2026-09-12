@@ -17,7 +17,7 @@ Tests for Rejection Mechanism — Agent拒绝权测试
 
 import time
 import pytest
-from openllm.governance.rejection import (
+from openllm.ios.rejection import (
     RejectionMechanism,
     RejectionRecord,
     RejectionReason,

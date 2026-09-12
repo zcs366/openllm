@@ -5,7 +5,7 @@ import tempfile
 import pytest
 from pathlib import Path
 
-from openllm.governance.feedback_loop import FeedbackRecord, FeedbackStore, FeedbackLoop
+from openllm.ios.feedback_loop import FeedbackRecord, FeedbackStore, FeedbackLoop
 
 
 @pytest.fixture

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from openllm.governance.verification_ledger import (
+from openllm.ios.verification_ledger import (
     VerificationEvidence,
     VerificationLedger,
 )

@@ -13,11 +13,11 @@ from pathlib import Path
 # 确保openllm包可导入
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from openllm.memory.temperature_engine import (
+from openllm.isa.temperature_engine import (
     calculate_temperature, CAUSAL_BONUS, BASE_HEAT,
     LAMBDA_MAP, EMOTION_ENABLED
 )
-from openllm.memory.causal_memory import CausalMemory
+from openllm.isa.causal_memory import CausalMemory
 from openllm.core.memory_os import MemoryEntry
 
 

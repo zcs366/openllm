@@ -193,7 +193,7 @@ class SelfHarness:
         if not self._precedent:
             return
         try:
-            from openllm.governance.precedent_log import ConflictType
+            from openllm.ios.precedent_log import ConflictType
             self._precedent.record(
                 day_number=1,
                 scenario=f"[self_harness] {p.action_type}: {p.target_change}",

@@ -149,7 +149,7 @@ class IdentityDiscovery:
             伤疤上下文块文本，异常或无数据时返回空字符串。
         """
         try:
-            from ..memory.causal_memory import get_causal_store
+            from ..isa.causal_memory import get_causal_store
             store = get_causal_store(self.causal_store_dir)
             return store.to_context_block(max_entries)
         except Exception as exc:

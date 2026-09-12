@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from openllm.memory.causal_memory import (
+from openllm.isa.causal_memory import (
     CausalMemoryStore,
     get_causal_store,
     _singleton_cache,

@@ -24,11 +24,11 @@ class TestKM1Import:
     """KM1：模块可import，核心类存在。"""
 
     def test_import_probe(self):
-        from openllm.memory.knowledge_monotonic import KnowledgeMonotonicProbe
+        from openllm.isa.knowledge_monotonic import KnowledgeMonotonicProbe
         assert KnowledgeMonotonicProbe is not None
 
     def test_import_report(self):
-        from openllm.memory.knowledge_monotonic import KnowledgeReport
+        from openllm.isa.knowledge_monotonic import KnowledgeReport
         assert KnowledgeReport is not None
 
 
@@ -47,7 +47,7 @@ class TestKM2KM3Snapshot:
     """KM2：take_snapshot真收集四容器数据；KM3：check_monotonic真做diff。"""
 
     def test_take_snapshot_returns_valid_dict(self, tmp_snapshot_dir):
-        from openllm.memory.knowledge_monotonic import KnowledgeMonotonicProbe
+        from openllm.isa.knowledge_monotonic import KnowledgeMonotonicProbe
         probe = KnowledgeMonotonicProbe(snapshot_dir=tmp_snapshot_dir)
         snap = probe.take_snapshot()
         assert "ts" in snap
@@ -59,7 +59,7 @@ class TestKM2KM3Snapshot:
             assert key in snap["counts"]
 
     def test_take_snapshot_persists_to_jsonl(self, tmp_snapshot_dir):
-        from openllm.memory.knowledge_monotonic import KnowledgeMonotonicProbe
+        from openllm.isa.knowledge_monotonic import KnowledgeMonotonicProbe
         probe = KnowledgeMonotonicProbe(snapshot_dir=tmp_snapshot_dir)
         probe.take_snapshot()
         # JSONL文件存在且有一行
@@ -69,7 +69,7 @@ class TestKM2KM3Snapshot:
         assert "counts" in rec
 
     def test_check_monotonic_two_snapshots(self, tmp_snapshot_dir):
-        from openllm.memory.knowledge_monotonic import KnowledgeMonotonicProbe
+        from openllm.isa.knowledge_monotonic import KnowledgeMonotonicProbe
         probe = KnowledgeMonotonicProbe(snapshot_dir=tmp_snapshot_dir)
         probe.take_snapshot()
         probe.take_snapshot()
@@ -79,7 +79,7 @@ class TestKM2KM3Snapshot:
         assert 0.0 <= report.recall <= 1.0
 
     def test_insufficient_data_one_snapshot(self, tmp_snapshot_dir):
-        from openllm.memory.knowledge_monotonic import KnowledgeMonotonicProbe
+        from openllm.isa.knowledge_monotonic import KnowledgeMonotonicProbe
         probe = KnowledgeMonotonicProbe(snapshot_dir=tmp_snapshot_dir)
         probe.take_snapshot()
         report = probe.check_monotonic()
@@ -93,7 +93,7 @@ class TestKM4Regression:
 
     def test_deleted_old_content_triggers_regression(self, tmp_snapshot_dir):
         """手动构造两份快照，第二份删除旧哈希→recall<1.0→regression。"""
-        from openllm.memory.knowledge_monotonic import (
+        from openllm.isa.knowledge_monotonic import (
             KnowledgeMonotonicProbe, KnowledgeReport,
         )
 
@@ -141,7 +141,7 @@ class TestKM5Stagnant:
     """零增长场景→verdict='stagnant'。"""
 
     def test_stagnant_when_no_growth(self, tmp_snapshot_dir):
-        from openllm.memory.knowledge_monotonic import KnowledgeMonotonicProbe
+        from openllm.isa.knowledge_monotonic import KnowledgeMonotonicProbe
 
         probe = KnowledgeMonotonicProbe(snapshot_dir=tmp_snapshot_dir)
 
@@ -174,7 +174,7 @@ class TestKM5Recall:
 
     def test_recall_0_5(self, tmp_snapshot_dir):
         """旧有4条哈希，新只剩2条→recall=0.5。"""
-        from openllm.memory.knowledge_monotonic import KnowledgeMonotonicProbe
+        from openllm.isa.knowledge_monotonic import KnowledgeMonotonicProbe
 
         probe = KnowledgeMonotonicProbe(snapshot_dir=tmp_snapshot_dir)
 
@@ -204,7 +204,7 @@ class TestKM5Counts:
     """验证take_snapshot的四容器计数与实际环境一致。"""
 
     def test_counts_are_non_negative_integers(self, tmp_snapshot_dir):
-        from openllm.memory.knowledge_monotonic import KnowledgeMonotonicProbe
+        from openllm.isa.knowledge_monotonic import KnowledgeMonotonicProbe
         probe = KnowledgeMonotonicProbe(snapshot_dir=tmp_snapshot_dir)
         snap = probe.take_snapshot()
         for name, count in snap["counts"].items():
@@ -218,7 +218,7 @@ class TestKM5Emit:
     """emit_report能写回bus。"""
 
     def test_emit_returns_event(self, tmp_snapshot_dir):
-        from openllm.memory.knowledge_monotonic import KnowledgeMonotonicProbe
+        from openllm.isa.knowledge_monotonic import KnowledgeMonotonicProbe
         probe = KnowledgeMonotonicProbe(snapshot_dir=tmp_snapshot_dir)
         probe.take_snapshot()
         probe.take_snapshot()
@@ -234,7 +234,7 @@ class TestKM6RealRun:
     """对真实环境take_snapshot两次并输出报告。"""
 
     def test_real_two_snapshots(self):
-        from openllm.memory.knowledge_monotonic import KnowledgeMonotonicProbe
+        from openllm.isa.knowledge_monotonic import KnowledgeMonotonicProbe
         probe = KnowledgeMonotonicProbe()
         snap1 = probe.take_snapshot()
         # 短暂间隔，模拟中间加一条数据

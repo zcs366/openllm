@@ -10,7 +10,7 @@ context_audit_logger.py — 上下文审计日志器
   前者是执行层，后者是策展层。
 
 用法:
-    from openllm.memory.context_audit_logger import ContextAuditLogger
+    from openllm.isa.context_audit_logger import ContextAuditLogger
     logger = ContextAuditLogger()
     record = logger.log_delegation(
         target="subagent-A",

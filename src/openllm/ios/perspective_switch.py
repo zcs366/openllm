@@ -8,7 +8,7 @@
 从而获得更完整的自我认知。
 
 用法：
-    from openllm.governance.perspective_switch import PerspectiveSwitch
+    from openllm.ios.perspective_switch import PerspectiveSwitch
     ps = PerspectiveSwitch()
     mapping = ps.get_mapping("user")  # 或 "system"
     prompt_context = ps.get_perspective_context("user")

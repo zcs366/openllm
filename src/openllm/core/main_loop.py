@@ -71,7 +71,7 @@ class Agent:
         
         # Session/Turn
         # 六体自监督反馈环
-        from ..governance.feedback_loop import FeedbackLoop
+        from ..ios.feedback_loop import FeedbackLoop
         self.feedback_loop = FeedbackLoop()
         self._body_outputs = {}  # 暂存每体最新输出
         
@@ -105,7 +105,7 @@ class Agent:
 
         # ── MemoryEvaluator 因果度量（E2 缺口③·2026-08-23） ──
         try:
-            from ..memory.memory_evaluator import MemoryEvaluator
+            from ..isa.memory_evaluator import MemoryEvaluator
             self.memory_evaluator = MemoryEvaluator()
         except Exception:
             self.memory_evaluator = None
@@ -255,7 +255,7 @@ class Agent:
         # ISL：session收尾沉淀一环（空环也写，不可撤销）
         try:
             from openllm.core.isl_chain import ISLChain
-            from openllm.memory.causal_memory import get_causal_store
+            from openllm.isa.causal_memory import get_causal_store
             scars = get_causal_store().get_by_session(self.session.id)
             ISLChain().append_epoch(
                 session_id=self.session.id,
@@ -275,7 +275,7 @@ class Agent:
             # 零turn会话跳过
             if not self.session.turns and not self._last_output:
                 return
-            from ..memory.capsule import TextCapsule, DeltaCapsule, MemoryOS
+            from ..isa.capsule import TextCapsule, DeltaCapsule, MemoryOS
             # 提取会话摘要
             decisions = []
             for t in self.session.turns:

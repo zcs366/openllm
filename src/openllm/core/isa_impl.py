@@ -18,7 +18,7 @@ class ISA:
         self._memory_bus = None
         # CausalMemoryStore — 唯一活实例（E2·2026-08-23）走工厂缓存
         try:
-            from ..memory.causal_memory import get_causal_store
+            from ..isa.causal_memory import get_causal_store
             _base = Path.home() / ".openllm" / "memory"
             self.causal = get_causal_store(_base / "causal")
         except Exception:
@@ -33,7 +33,7 @@ class ISA:
         """延迟获取MemoryBus实例（避免循环依赖）"""
         if self._memory_bus is None:
             try:
-                from ..memory.memory_bus import MemoryBus
+                from ..isa.memory_bus import MemoryBus
                 self._memory_bus = MemoryBus()
             except Exception:
                 pass
@@ -105,7 +105,7 @@ class ISA:
         bus = self._get_memory_bus()
         if bus:
             try:
-                from ..memory.memory_bus import Query as BusQuery
+                from ..isa.memory_bus import Query as BusQuery
                 q = BusQuery(text=msg.text, top_k=10, token_budget=2000)
                 records = bus.query(q)
                 if records:
@@ -120,7 +120,7 @@ class ISA:
         # 向后兼容：如果MemoryBus不可用，fallback到直连
         if "recalled" not in memory:
             try:
-                from ..memory.unified_memory import UnifiedMemory
+                from ..isa.unified_memory import UnifiedMemory
                 um = UnifiedMemory()
                 recalled = um.retrieve(msg.text, top_n=5)
                 if recalled:
@@ -145,7 +145,7 @@ class ISA:
                     causal_hints.append(m.get("lesson", ""))
         # [进化] 接入causal_memory结构化检索
         try:
-            from ..memory.causal_memory import get_causal_store
+            from ..isa.causal_memory import get_causal_store
             store = get_causal_store()
             relevant = store.search(context_features=[msg.text[:50]], max_results=3)
             if relevant:
@@ -215,7 +215,7 @@ class ISA:
                 trace_degradation("ISA", "build_context ForgettingCurve", _e)
         # [进化] 接入evidence_replay
         try:
-            from ..memory.evidence_replay import create_replay_for_context
+            from ..isa.evidence_replay import create_replay_for_context
             replay = create_replay_for_context(msg.text, None, top_k=3, max_tokens=256)
             if replay:
                 search_results.append(replay)
@@ -264,14 +264,14 @@ class ISA:
         """"Agent记忆列表(结构化)"""
         memories = []
         try:
-            from ..memory.unified_memory import UnifiedMemory
+            from ..isa.unified_memory import UnifiedMemory
             um = UnifiedMemory()
             for entry in list(um._hot_cache.values()) + list(um._warm_cache.values()):
                 memories.append({"key": entry.key, "importance": entry.importance, "layer": entry.layer, "content": str(entry.value)[:100]})
         except Exception:
             pass
         try:
-            from ..memory.causal_memory import get_causal_store
+            from ..isa.causal_memory import get_causal_store
             store = get_causal_store()
             for r in store.search(max_results=10):
                 memories.append({"key": r.memory_id, "importance": 0.8, "layer": "causal", "content": (r.lesson or str(r))[:100]})
@@ -282,7 +282,7 @@ class ISA:
     def forget(self, key: str):
         """"删除指定记忆"""
         try:
-            from ..memory.unified_memory import UnifiedMemory
+            from ..isa.unified_memory import UnifiedMemory
             um = UnifiedMemory()
             if key in um._hot_cache:
                 del um._hot_cache[key]

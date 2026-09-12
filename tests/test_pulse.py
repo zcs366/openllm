@@ -190,7 +190,7 @@ class TestEngine:
 class TestRealAdjudicatorIntegration:
     def test_real_adjudicator_passes_low_importance(self, tmp_path):
         """真实 P0-1 裁决器：非任务振动（importance 0.3）中性语义 → PASS。"""
-        from openllm.governance.adjudication import TransmissionAdjudicator
+        from openllm.ios.adjudication import TransmissionAdjudicator
         adj = TransmissionAdjudicator(log_dir=tmp_path / "adj")
         eng = make_engine(tmp_path, adjudicator=adj, randomize_kind=False)
         eng._window = TimeWindow(0, 24)
@@ -202,7 +202,7 @@ class TestRealAdjudicatorIntegration:
 
     def test_real_adjudicator_frequency_blocks(self, tmp_path):
         """真实裁决器频控：同源 10 次/分硬顶 → 高频 tick 后被 BLOCK。"""
-        from openllm.governance.adjudication import TransmissionAdjudicator
+        from openllm.ios.adjudication import TransmissionAdjudicator
         adj = TransmissionAdjudicator(log_dir=tmp_path / "adj", rate_limit=5)
         eng = make_engine(tmp_path, adjudicator=adj, randomize_kind=False,
                           max_per_day=100)

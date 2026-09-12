@@ -23,7 +23,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Optional
 
-logger = logging.getLogger("openllm.governance.evaluator_bias")
+logger = logging.getLogger("openllm.ios.evaluator_bias")
 
 # ── 持久化路径 ──
 _STATE_DIR = Path.home() / ".hermes" / "governance"

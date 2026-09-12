@@ -3,7 +3,7 @@
 import sys, os, tempfile, json, shutil
 sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
 
-from openllm.governance.feedback_loop import FeedbackLoop, FeedbackStore
+from openllm.ios.feedback_loop import FeedbackLoop, FeedbackStore
 from dataclasses import asdict
 
 tmpdir = tempfile.mkdtemp()

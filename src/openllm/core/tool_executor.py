@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..tools.executor import ToolResult
-from ..memory.execution_recorder import record_execution
+from ..isa.execution_recorder import record_execution
 
 logger = logging.getLogger("openllm.engine.tool_executor")
 

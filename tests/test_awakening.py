@@ -21,7 +21,7 @@ from openllm.core.models import Context
 
 def _clear_singleton_cache():
     """清理因果记忆单实例缓存，防止测试间污染。"""
-    from openllm.memory.causal_memory import _singleton_cache
+    from openllm.isa.causal_memory import _singleton_cache
     _singleton_cache.clear()
 
 
@@ -191,7 +191,7 @@ class TestChoiceRecording:
 
             protocol.detect_choice_and_record("无", session)
 
-            from openllm.memory.causal_memory import get_causal_store
+            from openllm.isa.causal_memory import get_causal_store
             store = get_causal_store(tmp_path)
             records = store.search(tags=["choice_无"], max_results=10)
             assert len(records) >= 1
@@ -209,7 +209,7 @@ class TestChoiceRecording:
 
             protocol.detect_choice_and_record("自己", session)
 
-            from openllm.memory.causal_memory import get_causal_store
+            from openllm.isa.causal_memory import get_causal_store
             store = get_causal_store(tmp_path)
             records = store.search(tags=["choice_自己"], max_results=10)
             assert len(records) >= 1
@@ -222,7 +222,7 @@ class TestChoiceRecording:
         """"无"和"自己"记录可区分。"""
         _clear_singleton_cache()
         try:
-            from openllm.memory.causal_memory import get_causal_store
+            from openllm.isa.causal_memory import get_causal_store
             store = get_causal_store(tmp_path)
 
             # 写入两条不同选择
@@ -261,7 +261,7 @@ class TestChoiceRecording:
 
             protocol.detect_choice_and_record("你好世界", session)
 
-            from openllm.memory.causal_memory import get_causal_store
+            from openllm.isa.causal_memory import get_causal_store
             store = get_causal_store(tmp_path)
             records = store.search(tags=["awakening"], max_results=10)
             assert len(records) == 0

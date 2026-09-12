@@ -2,7 +2,7 @@
 """Reliability Engine 测试"""
 import sys
 sys.path.insert(0, 'src')
-from openllm.governance.reliability import (
+from openllm.ios.reliability import (
     ReliabilityEngine, ObservabilityDetector, RepairabilityEngine,
     EvolvabilityEngine, InfraAwarenessMonitor,
     ReliabilityDimension, Severity, RepairAction,

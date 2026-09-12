@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-logger = logging.getLogger("openllm.governance.adjudication")
+logger = logging.getLogger("openllm.ios.adjudication")
 DEFAULT_LOG_DIR = Path.home() / ".openllm" / "adjudication"
 
 # L0 · 红线类型（对齐 event_bus Event._BLOCKED —— 任何体不得终止对话）

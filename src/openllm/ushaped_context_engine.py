@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from openllm.context_engine import ContextEngine, ContextEntry, SearchResult
-from openllm.memory.temperature_engine import (
+from openllm.isa.temperature_engine import (
     compute_entry_temperature, temperature_state, should_evict,
     HOT_THRESHOLD, WARM_THRESHOLD, COLD_THRESHOLD, EVICT_THRESHOLD,
 )

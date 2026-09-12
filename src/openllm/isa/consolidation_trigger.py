@@ -117,14 +117,14 @@ class ConsolidationTrigger:
     def _get_pressure(self):
         """惰性获取 ContextPressureMonitor 实例。"""
         if self._pressure is None:
-            from openllm.memory.context_pressure import ContextPressureMonitor
+            from openllm.isa.context_pressure import ContextPressureMonitor
             self._pressure = ContextPressureMonitor()
         return self._pressure
 
     def _get_orchestrator(self):
         """惰性获取 ConsolidationOrchestrator 实例。"""
         if self._orchestrator is None:
-            from openllm.memory.consolidation_orchestrator import (
+            from openllm.isa.consolidation_orchestrator import (
                 ConsolidationOrchestrator,
             )
             self._orchestrator = ConsolidationOrchestrator()

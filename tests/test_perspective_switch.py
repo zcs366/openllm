@@ -3,7 +3,7 @@
 import sys, os
 sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
 
-from openllm.governance.perspective_switch import (
+from openllm.ios.perspective_switch import (
     PerspectiveSwitch, SYSTEM_PERSPECTIVE, USER_PERSPECTIVE, PERSPECTIVES
 )
 

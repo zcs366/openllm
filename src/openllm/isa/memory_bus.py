@@ -311,7 +311,7 @@ class MemoryBus:
         for name, mod_path, cls_name in _providers:
             try:
                 import importlib
-                mod = importlib.import_module(mod_path, package="openllm.memory")
+                mod = importlib.import_module(mod_path, package="openllm.isa")
                 cls = getattr(mod, cls_name)
                 self.register(cls())
             except Exception as e:

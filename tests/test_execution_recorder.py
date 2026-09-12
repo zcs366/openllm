@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch, call
 # Ensure openllm is importable
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from openllm.memory.execution_recorder import (
+from openllm.isa.execution_recorder import (
     record_execution,
     _write_one_sync,
     RECALL_APPEND_SCRIPT,
@@ -53,7 +53,7 @@ class TestRecordExecutionJSON:
         long_result = "y" * 300
         assert len(long_result[:200]) == 200
 
-    @patch("openllm.memory.execution_recorder.subprocess.run")
+    @patch("openllm.isa.execution_recorder.subprocess.run")
     def test_write_one_sync_calls_recall_append(self, mock_run):
         """_write_one_sync 正确调用 recall_append.py。"""
         mock_run.return_value = MagicMock(returncode=0)
@@ -80,7 +80,7 @@ class TestRecordExecutionJSON:
 class TestToolExecutionTriggersRecording:
     """b) 工具执行后确实触发记录。"""
 
-    @patch("openllm.memory.execution_recorder.subprocess.run")
+    @patch("openllm.isa.execution_recorder.subprocess.run")
     def test_record_execution_queues_and_writes(self, mock_run):
         """record_execution 入队并通过后台线程写入。"""
         mock_run.return_value = MagicMock(returncode=0)
@@ -102,7 +102,7 @@ class TestToolExecutionTriggersRecording:
         assert parsed["status"] == "ok"
         assert parsed["duration_ms"] == 42.3
 
-    @patch("openllm.memory.execution_recorder.subprocess.run")
+    @patch("openllm.isa.execution_recorder.subprocess.run")
     def test_error_status_recorded(self, mock_run):
         """错误状态正确记录。"""
         mock_run.return_value = MagicMock(returncode=0)
@@ -123,7 +123,7 @@ class TestToolExecutionTriggersRecording:
 class TestWriteFailureIsolation:
     """c) 写入失败时工具执行不受影响。"""
 
-    @patch("openllm.memory.execution_recorder.subprocess.run")
+    @patch("openllm.isa.execution_recorder.subprocess.run")
     def test_subprocess_exception_does_not_propagate(self, mock_run):
         """recall_append.py抛异常时，record_execution不报错。"""
         mock_run.side_effect = OSError("No such file or directory")
@@ -139,7 +139,7 @@ class TestWriteFailureIsolation:
         # Verify the exception was caught (mock was called and failed)
         assert mock_run.called
 
-    @patch("openllm.memory.execution_recorder.subprocess.run")
+    @patch("openllm.isa.execution_recorder.subprocess.run")
     def test_write_one_sync_handles_timeout(self, mock_run):
         """_write_one_sync 处理超时异常。"""
         import subprocess
@@ -148,7 +148,7 @@ class TestWriteFailureIsolation:
         # Should not raise
         _write_one_sync(record)
 
-    @patch("openllm.memory.execution_recorder.subprocess.run")
+    @patch("openllm.isa.execution_recorder.subprocess.run")
     def test_write_one_sync_handles_json_error(self, mock_run):
         """recall_append返回非零退出码不影响调用方。"""
         mock_run.return_value = MagicMock(returncode=1, stderr="bad json")
