@@ -17,7 +17,9 @@ class LLMProvider:
         
         self.model = model or provider_cfg.get("model", "deepseek-chat")
         self.endpoint = provider_cfg.get("endpoint", "https://api.deepseek.com/v1/chat/completions")
-        self.api_key = provider_cfg.get("api_key", "")
+        # 正确取key：环境变量 → 密钥库(keyvault) → config明文（2026-09-10 迁keyring后）
+        from ..security.keyvault import resolve_api_key
+        self.api_key, _key_source = resolve_api_key(default_provider, provider_cfg)
         self._available = bool(self.api_key) or "localhost" in self.endpoint
         # Gateway fallback: config.json 里 key 为空时读文件
         if not self.api_key and self.endpoint and "127.0.0.1" in self.endpoint:
