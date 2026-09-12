@@ -237,6 +237,21 @@ class AgentShell(cmd.Cmd):
             except Exception as e:
                 print(f"\n{C.RED}搜索失败: {e}{C.RESET}")
 
+        elif cmd == "context":
+            a = self.agent
+            p = a.octopus.left.provider
+            usage = getattr(p, '_last_usage', {}) or {}
+            max_ctx = getattr(a.session, 'max_context_tokens', 100000) or 100000
+            total = usage.get('total_tokens', 0)
+            pct = total / max_ctx * 100 if max_ctx else 0
+            print(f"\n{C.BOLD}═══ 上下文状态 ═══{C.RESET}")
+            print(f"  模型: {p.model} · 窗口 {max_ctx:,} token")
+            print(f"  最近一次调用:")
+            print(f"    输入: {usage.get('prompt_tokens',0):,} token")
+            print(f"    输出: {usage.get('completion_tokens',0):,} token")
+            print(f"    缓存: {usage.get('cached_tokens',0):,} token")
+            print(f"  单次占用: {pct:.1f}% ({total:,}/{max_ctx:,})")
+
         elif cmd == "model":
             config = self._load_config()
             providers = config.get("providers", {})
@@ -276,6 +291,7 @@ class AgentShell(cmd.Cmd):
 {C.BOLD}可用命令:{C.RESET}
   直接打字    对话（Agent六体心跳处理）
   /model      查看/切换模型（/model <名称> 切换）
+  /context    查看上下文状态（输入/输出/缓存/占用比例）
   /status     查看Agent状态
   /research   查看研究循环状态
   /hypothesis <claim>  注册新假说

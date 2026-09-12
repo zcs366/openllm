@@ -67,10 +67,12 @@ class LLMProvider:
             resp.raise_for_status()
             data = resp.json()
             usage = data.get("usage", {})
+            prompt_details = usage.get("prompt_tokens_details", {}) or {}
             self._last_usage = {
                 "prompt_tokens": usage.get("prompt_tokens", 0),
                 "completion_tokens": usage.get("completion_tokens", 0),
                 "total_tokens": usage.get("total_tokens", 0),
+                "cached_tokens": prompt_details.get("cached_tokens", 0),
             }
             choice = data["choices"][0]["message"]
             content = choice.get("content", "")
