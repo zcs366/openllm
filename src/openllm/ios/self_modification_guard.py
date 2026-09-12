@@ -23,7 +23,7 @@ ROLLBACK_CONFIDENCE: float = 0.6     # 退化 + 高频 → 回滚
 # These are "my things" — irreversible, never hot-swap.
 FORBIDDEN_PATHS: list[str] = [
     # ISA memory: ~/.openllm/memory/, *.causal*, *.memory*, memory_bus*, auto_causal*
-    r"[\\/]memory[\\/]isa[\\/]",
+    r"[\\/]isa[\\/]",
     r"[\\/]isa_impl\.py$",
     r"[\\/]isa_impl\b",
     r"[\\/]memory_bus\.py$",
