@@ -8,11 +8,11 @@ from .models import *
 class LLMProvider:
     """最简单的LLM调用封装（支持多provider）"""
     
-    def __init__(self, model: str = None):
+    def __init__(self, model: Optional[str] = None, provider_name: Optional[str] = None):
         config = self._load_config()
         
-        # 从config读取default_provider
-        default_provider = config.get("default_provider", "deepseek")
+        # 从config读取default_provider（或显式指定的 provider_name）
+        default_provider = provider_name or config.get("default_provider", "deepseek")
         provider_cfg = config.get("providers", {}).get(default_provider, {})
         
         self.model = model or provider_cfg.get("model", "deepseek-chat")

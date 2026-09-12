@@ -8,7 +8,14 @@
 
 ### Windows 双击（最简单）
 
-双击 `启动OpenLLM.bat`（就是 I 盘 openllm 目录下那个），进入交互对话。
+双击 `OpenLLM.bat`（或 `启动OpenLLM.bat`），进入交互对话。
+
+### PowerShell
+
+```powershell
+# 右键"使用 PowerShell 运行"，或：
+powershell -File I:\openllm\启动OpenLLM.ps1
+```
 
 ### WSL 命令行
 
@@ -31,6 +38,8 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m openllm.cli.main
 | 输入 | 作用 |
 |------|------|
 | 直接打字 | 对话（短问题走快路径，长任务走六体心跳） |
+| `/model` | 列出所有可用模型 |
+| `/model <名称>` | 切换模型（mimo/deepseek/glm/alibaba/oneapi/newapi） |
 | `搜一搜 xxx` / `查一查 xxx` | 自动联网搜索 + 基于结果回答 |
 | `/status` | 查看 Agent 状态 |
 | `/search <query>` | 手动搜索 |
@@ -64,7 +73,18 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m openllm.cli.main
 ```
 
 - **API key 存在密钥库**（`~/.openllm/vault/`，DPAPI 加密），不是明文。
-- 切换模型：改 `default_provider`（mimo / deepseek / ollama 本地）。
+- **切换模型**：对话里 `/model` 查看，`/model glm` 切换；或改 `default_provider`。
+- **已配好的 6 个 provider**：
+
+| 名称 | 模型 | 说明 |
+|------|------|------|
+| `mimo` | mimo-v2.5 | 小米（默认，1M 上下文） |
+| `deepseek` | deepseek-v4-flash | DeepSeek |
+| `glm` | glm-4.6 | 智谱 |
+| `alibaba` | qwen3.8-max | 通义千问 |
+| `oneapi` | openai/gpt-oss-120b | 自建网关 13000（免费聚合） |
+| `newapi` | openai/gpt-oss-120b | 自建网关 13001（免费聚合） |
+
 - key 取用顺序：环境变量 → 密钥库 → config 明文。
 
 ---

@@ -237,10 +237,33 @@ class AgentShell(cmd.Cmd):
             except Exception as e:
                 print(f"\n{C.RED}搜索失败: {e}{C.RESET}")
 
+        elif cmd == "model":
+            config = self._load_config()
+            providers = config.get("providers", {})
+            default = config.get("default_provider", "mimo")
+            if not args:
+                print(f"\n{C.BOLD}═══ 可用模型 ═══{C.RESET}")
+                for name, p in providers.items():
+                    mark = f"{C.GREEN} ← 当前{C.RESET}" if name == default else ""
+                    model = p.get("model", "?")
+                    print(f"  {C.BOLD}{name}{C.RESET}: {model}{mark}")
+                print(f"\n  切换: /model <名称>")
+            else:
+                name = args[0].lower()
+                if name not in providers:
+                    print(f"  {C.RED}未知 provider: {name}{C.RESET}  用 /model 查看列表")
+                else:
+                    config["default_provider"] = name
+                    self._save_config(config)
+                    self._reinit_provider(name)
+                    model = providers[name].get("model", "")
+                    print(f"  {C.GREEN}✅ 已切换到 {name} ({model}){C.RESET}")
+
         elif cmd == "help":
             print(f"""
 {C.BOLD}可用命令:{C.RESET}
   直接打字    对话（Agent六体心跳处理）
+  /model      查看/切换模型（/model <名称> 切换）
   /status     查看Agent状态
   /research   查看研究循环状态
   /hypothesis <claim>  注册新假说
@@ -250,6 +273,26 @@ class AgentShell(cmd.Cmd):
 
         else:
             print(f"  {C.YELLOW}未知命令: /{cmd}{C.RESET}  输入 /help 查看帮助")
+
+    def _load_config(self) -> dict:
+        cfg_path = Path.home() / ".openllm" / "config.json"
+        if cfg_path.exists():
+            try:
+                with open(cfg_path) as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def _save_config(self, config: dict) -> None:
+        cfg_path = Path.home() / ".openllm" / "config.json"
+        with open(cfg_path, "w") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+
+    def _reinit_provider(self, name: str) -> None:
+        from openllm.core.provider_impl import LLMProvider
+        self.agent.octopus.left.provider = LLMProvider(provider_name=name)
+        self.agent.octopus.right.provider = LLMProvider(provider_name=name)
 
     def do_exit(self, arg):
         print(f"\n{C.DIM}关闭Agent...{C.RESET}")
