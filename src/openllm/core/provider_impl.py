@@ -7,7 +7,15 @@ from .models import *
 
 class LLMProvider:
     """最简单的LLM调用封装（支持多provider）"""
-    
+
+    # ── 超时（2026-09-15 医师接骨）──
+    # 原 timeout=120 对「服务端吐心跳的慢响应」无效：requests 的 read timeout 是
+    # 「两个字节之间的间隔」语义，服务端每吐一个字节就重置计时器。实测 DeepSeek
+    # 排队 900 秒才回，客户端全程静默（用户看到的是「说完话没有任何反应」）。
+    # 拆成 (connect, read) 元组才是真超时；read 可用环境变量调小以便测试。
+    CONNECT_TIMEOUT = float(os.environ.get("OPENLLM_LLM_CONNECT_TIMEOUT", "10"))
+    READ_TIMEOUT = float(os.environ.get("OPENLLM_LLM_READ_TIMEOUT", "90"))
+
     def __init__(self, model: Optional[str] = None, provider_name: Optional[str] = None):
         config = self._load_config()
         
@@ -62,10 +70,24 @@ class LLMProvider:
                     "max_tokens": 8192,
                     "temperature": 0.7,
                 },
-                timeout=120,
+                timeout=(self.CONNECT_TIMEOUT, self.READ_TIMEOUT),
             )
             resp.raise_for_status()
             data = resp.json()
+
+            # ── 服务端会把 error 体塞进 HTTP 200（2026-09-15 医师接骨）──
+            # 实测 DeepSeek 排队超时返回的就是 200 + {"error":{"message":"..."}}。
+            # 旧代码直接取 data["choices"] → KeyError → 被下面 except 兜成
+            # "[LLM错误] 'choices'"，把服务端原话换成了最没用的一条信息。
+            if isinstance(data, dict) and data.get("error"):
+                err = data["error"]
+                msg = err.get("message") if isinstance(err, dict) else str(err)
+                self._last_usage = {}
+                return f"[LLM错误] 服务端拒绝: {msg}"
+            if not isinstance(data, dict) or not data.get("choices"):
+                self._last_usage = {}
+                return f"[LLM错误] 响应缺少 choices 字段: {str(data)[:300]}"
+
             usage = data.get("usage", {})
             prompt_details = usage.get("prompt_tokens_details", {}) or {}
             self._last_usage = {
@@ -80,6 +102,13 @@ class LLMProvider:
             # 仅在content确实为空时fallback到reasoning_content
             if not content and choice.get("reasoning_content"):
                 content = choice["reasoning_content"]
+            # ── 空回复要给出解释，不能返回 ''（2026-09-15 接骨）──
+            # 旧行为：返回 '' → CLI 打印 "(无输出)"，用户无法判断是模型坏了还是
+            # token 用尽了。实测 mimo/glm/oneapi 都会出现这种空 content。
+            if not content:
+                finish = data["choices"][0].get("finish_reason", "")
+                return (f"[LLM空回复] 模型未产出正文（finish_reason={finish}）。"
+                        f"多为推理占满 max_tokens——请调大 max_tokens 或换模型。")
             return content
         except Exception as e:
-            return f"[LLM错误] {e}"
+            return f"[LLM错误] {type(e).__name__}: {e}"

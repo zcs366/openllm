@@ -435,6 +435,21 @@ class Agent:
         except Exception:
             pass  # 预算追踪失败不阻塞主循环
 
+        # ── 固化触发接线（2026-09-15，通道合规修补·军令5）──
+        # ConsolidationTrigger：压力→固化旁路。压力达阈值时路由
+        # ConsolidationOrchestrator.run_cycle()（固化管线通车点）。
+        # 完全隔离：固化链任何异常只记日志，绝不影响主循环/计费。
+        try:
+            from ..isa.consolidation_trigger import ConsolidationTrigger
+            if getattr(self, "_consolidation_trigger", None) is None:
+                self._consolidation_trigger = ConsolidationTrigger()
+            used = prompt_tokens + completion_tokens
+            session_id = getattr(getattr(self, "session", None), "id", None) or f"s{int(time.time())}"
+            budget = int(os.environ.get("OPENLLM_CONTEXT_BUDGET", "32000"))  # TODO(budget来源): 待接配置
+            self._consolidation_trigger.on_usage(session_id, used, budget)
+        except Exception:
+            pass  # 固化触发失败不阻塞主循环
+
     def _execute_tick(self, msg: Message):
         """一次完整的10阶段心跳（委托给agent_heartbeat）"""
         self._last_message = msg  # DR-20260829-01R: 记录末次输入供shutdown持久化

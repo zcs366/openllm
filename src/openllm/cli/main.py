@@ -48,6 +48,39 @@ def banner():
 """
 
 
+def _render_reply(result) -> str:
+    """把引擎返回的文本呈现给用户。空则返回 ''。
+
+    2026-09-15 医师接骨：此处原本还有一层「噪声过滤」，逻辑是遍历所有行、把
+    ``last_clean_start`` 更新为**最后一条干净行**的下标，再从那里往后切。
+    后果：任何多段回复都只剩最后一段。真实模型输出实测——
+
+        介绍一下你自己：364 字 13 行 → 126 字 2 行（丢 65%）
+        你好，老搭档  ： 71 字  5 行 →   9 字 1 行（丢 87%）
+
+    更糟的是黑名单里有「搜索／写入／洞察／来源／关键／意识」等常用词，连
+    ``openLLM`` 自己名字都在内——模型正常提到这些词的行会被整行删掉。而黑名单
+    里的大写项（PLUR/jika）用 ``s.lower()`` 比较，永远匹配不上，属死条目。
+
+    内部噪声的分离是上游的职责，不是 CLI 的：
+      · 心跳路径 ``agent.run_once()`` 返回前已过 ``main_loop._clean_output()``
+        （反向扫描、遇内部标记即停、黑名单精准）；
+      · 快路径 ``provider.chat()`` 返回的就是模型正文，本来无噪声。
+    因此这一层只做一件确定的事：整段被 ``` 围栏包裹时剥掉围栏（沿用原意，
+    用于清掉 ```json/markdown 包装），其余原样透传。
+    """
+    if result is None:
+        return ""
+    text = str(result).strip()
+    if not text:
+        return ""
+    if text.startswith("```") and "\n" in text:
+        body = text.split("\n", 1)[1]
+        if body.rstrip().endswith("```"):
+            text = body.rstrip()[:-3].strip()
+    return text
+
+
 class AgentShell(cmd.Cmd):
     """Agent模式Shell——六体架构驱动。"""
 
@@ -125,32 +158,28 @@ class AgentShell(cmd.Cmd):
 
         dt = time.time() - t0
 
-        if result:
-            clean = result.strip()
-            # 去掉```json/markdown包裹
-            if clean.startswith("```"):
-                parts = clean.split("\n", 1)
-                if len(parts) > 1:
-                    clean = parts[1].rsplit("```", 1)[0].strip()
-            # 过滤内部噪声：只保留agent真正回复的内容
-            # 激进清理：只保留最后一段agent的自然语言回复
-            # 内部系统(jiak/章鱼/搜索/压缩)的输出都在前面，agent回复在最后
-            lines = clean.split("\n")
-            # 从末尾开始，找最后一段"正常"文本（不含内部标记）
-            noise_patterns = ["[", "摘要", "---", "□", "🔴", "🗜️", "关键", "洞察", "决策", "铁律", "线索", "来源", "写入", "意识", "强制", "语义", "章鱼", "PLUR", "jika", "jiak", "openllm", "━━", "──", "│", "╔", "╚", "搜索", "未读"]
-            last_clean_start = 0
-            for i, line in enumerate(lines):
-                s = line.strip()
-                if s and not any(p in s.lower() for p in noise_patterns):
-                    last_clean_start = i
-            clean = "\n".join(lines[last_clean_start:]).strip()
-            # 去掉空行
-            clean = "\n".join(l for l in clean.split("\n") if l.strip()).strip()
-            print(f"{clean}")
+        # 2026-09-15 医师接骨：此处原有一层「噪声过滤」，会把多段回复砍到只剩
+        # 最后一段（实测丢 65%~87%）。理由与替代方案见 _render_reply 的 docstring。
+        text = _render_reply(result)
+        if text:
+            print(text)
         else:
             print(f"{C.DIM}(无输出){C.RESET}")
 
         print(f"{C.DIM}[{dt:.1f}s]{C.RESET}")
+
+    def onecmd(self, line: str):
+        """cmd.Cmd 钩子——返回真值即终止输入循环。
+
+        2026-09-15 医师接骨：`/exit` 原先只打印「关闭Agent...」但不退出，光标又
+        回到 ``你 ▸`` 继续等输入，只能 Ctrl-D 才能走。根因是 ``default()`` 丢弃了
+        ``_handle_command`` 的返回值，True 传不到 ``cmdloop``。
+        终止信号放在 ``onecmd`` 而不是 ``default``：typeshed 把 ``Cmd.default``
+        标注为 ``-> None``，而 ``Cmd.onecmd`` 是 ``-> bool | None``。
+        """
+        if line.strip().lower() in ("/exit", "/quit", "/q"):
+            return self.do_exit("")
+        return super().onecmd(line)
 
     def _do_search(self, query):
         """执行搜索并显示结果。"""
