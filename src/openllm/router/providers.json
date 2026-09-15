@@ -1,0 +1,95 @@
+{
+  "providers": [
+    {
+      "name": "deepseek",
+      "endpoint": "https://api.deepseek.com/v1",
+      "model": "deepseek-chat",
+      "protocol": "openai",
+      "key_source": "env:DEEPSEEK_API_KEY",
+      "cost_tier": 3,
+      "quality_tier": 3,
+      "capabilities": ["math", "code", "general", "chat"]
+    },
+    {
+      "name": "glm",
+      "endpoint": "$GLM_BASE_URL",
+      "model": "glm-5",
+      "protocol": "openai",
+      "key_source": "env:GLM_API_KEY",
+      "cost_tier": 3,
+      "quality_tier": 3,
+      "capabilities": ["math", "code", "general", "chat"],
+      "notes": "content为空时读reasoning_content"
+    },
+    {
+      "name": "qwen-max",
+      "endpoint": "$ALIBABA_PLAN_BASE_URL",
+      "model": "qwen3.8-max",
+      "protocol": "openai",
+      "key_source": "env:ALIBABA_PLAN_API_KEY",
+      "cost_tier": 3,
+      "quality_tier": 3,
+      "capabilities": ["math", "code", "general", "chat"]
+    },
+    {
+      "name": "mimo",
+      "endpoint": "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+      "model": "mimo-v2.5",
+      "protocol": "openai",
+      "key_source": "vault:openllm:mimo",
+      "cost_tier": 3,
+      "quality_tier": 3,
+      "capabilities": ["math", "code", "general", "chat"],
+      "notes": "endpoint是完整chat URL，禁止再拼/chat/completions"
+    },
+    {
+      "name": "one-api",
+      "endpoint": "http://127.0.0.1:13000/v1",
+      "protocol": "openai",
+      "key_source": "file:~/one-api/.gateway_key",
+      "cost_tier": 2,
+      "quality_tier": 2,
+      "models": [
+        "qwen/qwen3.8-27b",
+        "gemini-3.6-flash",
+        "openai/gpt-oss-120b",
+        "groq/compound-mini",
+        "dots-studio/dots-3-note-preview:free",
+        "inclusionai/ling-3.0-flash-fin:free",
+        "liquid/lfm-2.5-2.6b:free"
+      ],
+      "capabilities": ["general", "chat"]
+    },
+    {
+      "name": "new-api",
+      "endpoint": "http://127.0.0.1:13001/v1",
+      "protocol": "openai",
+      "key_source": "sqlite:runtime",
+      "cost_tier": 2,
+      "quality_tier": 2,
+      "models": [
+        "qwen/qwen3.8-27b",
+        "gemini-3.6-flash",
+        "openai/gpt-oss-120b",
+        "groq/compound-mini",
+        "dots-studio/dots-3-note-preview:free",
+        "inclusionai/ling-3.0-flash-fin:free",
+        "liquid/lfm-2.5-2.6b:free",
+        "claude-sonnet-4-20250514",
+        "claude-3-7-sonnet-20250219"
+      ],
+      "capabilities": ["general", "chat"],
+      "sqlite_query": "SELECT 'sk-'||key FROM tokens WHERE status=1 AND deleted_at IS NULL ORDER BY id DESC LIMIT 1",
+      "sqlite_db": "/home/zcs/new-api/data/one-api.db"
+    },
+    {
+      "name": "ollama",
+      "endpoint": "http://127.0.0.1:11434",
+      "protocol": "ollama",
+      "model": "ilm-v6",
+      "cost_tier": 0,
+      "quality_tier": 1,
+      "capabilities": ["general", "chat"]
+    }
+  ]
+}
