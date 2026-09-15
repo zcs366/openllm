@@ -688,14 +688,35 @@ class DelegationGuard:
 
 class GovernanceAuditLog:
     """治理审计日志——append-only SQLite + 链式hash验证。
-    
-    存储: ~/.hermes/hermes.db (governance_audit表)
-    链式hash: 每行prev_hash = sha256(前一行内容)
+
+    存储: ~/.openllm/governance/audit.db（governance_audit 表）
+          可用环境变量 OPENLLM_AUDIT_DB 覆盖（测试/多实例）。
+
+    2026-09-15 医师接骨：原先硬编码 ~/.hermes/hermes.db——IOS（openLLM 自己的
+    决策层）的治理审计落在 Hermes 的家目录里，等于六体不自足：换 HOME、换机器、
+    或沙箱启动时立刻崩，实测复现于 HOME=/tmp/dsh：
+
+        sqlite3.OperationalError: unable to open database file
+
+    历史数据用 scripts/migrate_governance_audit_db.py 一次性平移（保序保hash，
+    不删源库），平移后链式hash保持连续。
     """
-    
-    def __init__(self):
+
+    LEGACY_DB_RELPATH = "~/.hermes/hermes.db"
+
+    @staticmethod
+    def default_db_path() -> str:
+        """审计库落点——先看环境变量，再取 openLLM 自己的家目录。"""
+        return (os.environ.get("OPENLLM_AUDIT_DB")
+                or os.path.expanduser("~/.openllm/governance/audit.db"))
+
+    def __init__(self, db_path=None):
         import sqlite3
-        self._db_path = os.path.expanduser("~/.hermes/hermes.db")
+        self._db_path = db_path or self.default_db_path()
+        # 目录不存在就建——旧代码假定 ~/.hermes 一定存在，沙箱里直接崩。
+        parent = os.path.dirname(self._db_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")  # 写入并发安全
         self._ensure_table()

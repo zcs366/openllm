@@ -26,6 +26,13 @@ from typing import Optional
 
 logger = logging.getLogger("openllm.ios.stateful_audit")
 
+# ─ 默认审计目录 ──
+# 2026-09-15 医师接骨：原先是 __init__ 里的内联字面量，测试无法重定向 →
+# tests/test_governance.py 等用例把审计文件直接写进生产目录
+# ~/.hermes/jiak/governance_audit/（累积 1.6M+705K）。抽成模块级常量的意义
+# 不在于改默认值，而在于**给测试一个可 monkeypatch 的接缝**（conftest 已接）。
+DEFAULT_AUDIT_DIR = Path.home() / ".hermes" / "jiak" / "governance_audit"
+
 
 @dataclass
 class AuditRecord:
@@ -86,10 +93,10 @@ class StatefulAuditTrail:
                  retention_days: int = 90):
         """
         Args:
-            audit_dir: 审计日志目录，默认 ~/.hermes/jiak/governance_audit/
+            audit_dir: 审计日志目录，默认 DEFAULT_AUDIT_DIR
             retention_days: 日志保留天数，超过则归档
         """
-        self.audit_dir = audit_dir or Path.home() / ".hermes" / "jiak" / "governance_audit"
+        self.audit_dir = audit_dir or DEFAULT_AUDIT_DIR
         self.audit_dir.mkdir(parents=True, exist_ok=True)
         self.archive_dir = self.audit_dir / "archive"
         self.archive_dir.mkdir(parents=True, exist_ok=True)
