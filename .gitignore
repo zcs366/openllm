@@ -11,3 +11,4 @@ caps/
 .DS_Store
 venv/
 .venv/
+.venv
