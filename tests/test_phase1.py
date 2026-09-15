@@ -146,11 +146,26 @@ class TestAgentConfig:
 
 
 class TestOpenLLMEngine:
-    def test_init_no_api(self):
-        """无API key时仍可初始化。"""
+    def _engine_without_keys(self, monkeypatch, tmp):
+        """构造"确实没有可用 key"的引擎（2026-09-16 修）。
+
+        原用例假设「没有 key 就是未连接」——但现实已多 provider + keyvault 取 key，
+        本机 keyvault 里有 gateway/mimo，引擎会真的连上（测试前提失效）。
+        显式钉住三个来源：① engine_utils.get_api_key（函数内 import，须 patch 定义处）
+        ② 环境变量 ③ provider 显式指定，避开 ~/.openllm/config.json 的 default_provider 解析。
+        """
+        from openllm.core import engine_utils
+        monkeypatch.setattr(engine_utils, "get_api_key", lambda *a, **k: "")
+        for var in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "MIMO_API_KEY",
+                    "ALIBABA_PLAN_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        config = AgentConfig(capsule_dir=tmp, provider="deepseek")
+        return OpenLLMEngine(config)
+
+    def test_init_no_api(self, monkeypatch):
+        """无可用 key 时仍可初始化（connected=False）。"""
         with tempfile.TemporaryDirectory() as tmp:
-            config = AgentConfig(capsule_dir=tmp)
-            engine = OpenLLMEngine(config)
+            engine = self._engine_without_keys(monkeypatch, tmp)
             assert not engine.connected
             assert engine.config.name == "OpenLLM"
 
@@ -170,11 +185,10 @@ class TestOpenLLMEngine:
             assert "state" in s
             assert "capsules" in s
 
-    def test_chat_no_api(self):
-        """无API key时chat返回友好提示。"""
+    def test_chat_no_api(self, monkeypatch):
+        """无可用 key 时 chat 返回友好提示（走 [未连接API] 分支）。"""
         with tempfile.TemporaryDirectory() as tmp:
-            config = AgentConfig(capsule_dir=tmp)
-            engine = OpenLLMEngine(config)
+            engine = self._engine_without_keys(monkeypatch, tmp)
             resp = engine.chat("你好")
             assert "未连接" in resp or "API" in resp
 
