@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 
 # Ensure openllm package is importable
-sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from openllm.message import Message
 from openllm.compaction_control import (

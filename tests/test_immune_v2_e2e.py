@@ -6,7 +6,8 @@
 1. 失败→分类器输出structural
 2. harness_layer=tool_interface
 3. 治理规则写入governance_rules.jsonl
-4. 审计事件写入hermes.db governance_audit表
+4. 审计事件写入治理审计库 governance_audit 表（2026-09-15 起为
+   ~/.openllm/governance/audit.db；此前为 ~/.hermes/hermes.db）
 5. 链式hash验证通过
 6. heuristics检索能返回relevant结果
 7. 成长信号日志输出
@@ -18,7 +19,7 @@ import json
 import tempfile
 import sqlite3
 
-sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from openllm.core.governance_engine import (
     GovernanceEngine, GovernanceAuditLog, HeuristicsConsumer, DelegationGuard

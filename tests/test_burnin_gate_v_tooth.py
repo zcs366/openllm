@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from openllm.iai.burnin_gate import (
     BurnInGate,

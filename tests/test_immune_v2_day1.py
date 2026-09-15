@@ -11,7 +11,7 @@ import json
 import time
 import os
 
-sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from openllm.core.governance_engine import DelegationGuard, GovernanceEngine
 from openllm.core.governance_rule import (

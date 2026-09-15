@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for idle_wander.py — 间隙体空闲期协议"""
 import sys, os, time
-sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from openllm.core.idle_wander import IdleWanderer, WanderDiscovery, WANDER_DOMAINS
 

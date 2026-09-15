@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """六体自监督压力测试"""
 import sys, os, tempfile, json, shutil
-sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from openllm.ios.feedback_loop import FeedbackLoop, FeedbackStore
 from dataclasses import asdict

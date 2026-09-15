@@ -7,7 +7,9 @@
 # ═══════════════════════════════════════════════════════════════════
 set -euo pipefail
 
-PROJ_DIR="/home/zcs/projects/openllm"
+# 2026-09-15 医师接骨：原为硬编码 "/home/zcs/projects/openllm"——误绑到另一份
+# 陈旧检出（与主仓历史分叉）。改为从脚本自身位置推仓库根，任何检出都能自洽运行。
+PROJ_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="${PROJ_DIR}/.venv/bin/python"
 export PYTHONPATH="${PROJ_DIR}/src:${PYTHONPATH:-}"
 
@@ -34,7 +36,7 @@ fi
 # 无 CLI main()，内联 Python 调用
 echo "[2/3] knowledge_monotonic (K度量) ..." | tee -a "${LOG}"
 if ${PYTHON} -c "
-from openllm.memory.knowledge_monotonic import KnowledgeMonotonicProbe
+from openllm.isa.knowledge_monotonic import KnowledgeMonotonicProbe
 probe = KnowledgeMonotonicProbe()
 snap = probe.take_snapshot()
 report = probe.check_monotonic()

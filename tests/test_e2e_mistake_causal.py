@@ -16,7 +16,7 @@ import json
 import pytest
 from pathlib import Path
 
-sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from openllm.isa.mistake_ledger import MistakeLedger
 from openllm.isa.mistake_bridge import mistake_to_causal, find_recurring_patterns

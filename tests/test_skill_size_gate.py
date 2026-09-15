@@ -10,7 +10,7 @@ import sys
 import pytest
 
 # 确保 openllm 包可导入
-OPENLLM_SRC = os.path.expanduser("~/projects/openllm/src")
+OPENLLM_SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if OPENLLM_SRC not in sys.path:
     sys.path.insert(0, OPENLLM_SRC)
 

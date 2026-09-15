@@ -9,10 +9,11 @@
 5. tools/call memory_read 读取记忆
 """
 import json
+import os
 import subprocess
 import sys
 
-PROJECT = "/home/zcs/projects/openllm"
+PROJECT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 PYTHON = f"{PROJECT}/.venv/bin/python"
 MODULE = "openllm.bridge.mcp_memory_server"
 

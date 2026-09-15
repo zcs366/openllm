@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for perspective_switch.py"""
 import sys, os
-sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from openllm.ios.perspective_switch import (
     PerspectiveSwitch, SYSTEM_PERSPECTIVE, USER_PERSPECTIVE, PERSPECTIVES

@@ -1,6 +1,6 @@
 """Day 3 测试: HTIR-Step1 harness_layer归因"""
 import sys, os
-sys.path.insert(0, os.path.expanduser("~/projects/openllm/src"))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from openllm.core.failure_tracker import (
     FailureCategory, HarnessLayer, CATEGORY_TO_LAYER, FailureSignature
