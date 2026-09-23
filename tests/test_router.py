@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from openllm.router import (
-    route, Budget, Decision, Executor, ExecutionResult,
+    route, Budget, Scenario, Decision, Executor, ExecutionResult,
     Ledger, h_of, get_distribution, get_registry, shannon_entropy
 )
 
@@ -377,6 +377,137 @@ class TestRegistry:
         if one_api:
             models = one_api.available_models
             assert len(models) > 0
+
+
+class TestScenarioV05:
+    """v0.5 延迟维：场景路由（任务书§五全部判据）"""
+
+    def test_batch_routes_to_batch_pool(self):
+        """batch场景路由结果 ∈ batch/both池，按cost升序首选本地"""
+        decision = route("翻译这段文档", Budget.FREE, Scenario.BATCH)
+        assert decision.provider.pool in ('batch', 'both')
+        assert decision.scenario == 'batch'
+
+    def test_interactive_never_lands_batch_only(self):
+        """interactive场景永不路由到batch-only执行器"""
+        for q in ["你好", "求解微分方程 dy/dx = 2x", "写一个快速排序算法"]:
+            decision = route(q, Budget.QUALITY, Scenario.INTERACTIVE)
+            assert decision.provider.pool in ('interactive', 'both'), \
+                f"interactive落到了batch-only执行器: {decision.provider.name}"
+
+    def test_interactive_fallback_never_crosses_pool(self):
+        """interactive降级链不得混入batch-only执行器"""
+        decision = route("解释量子计算", Budget.QUALITY, Scenario.INTERACTIVE)
+        registry = get_registry()
+        for name in decision.fallback_chain:
+            p = registry.get_provider(name)
+            assert p is not None
+            assert p.pool in ('interactive', 'both'), \
+                f"interactive降级链混入batch-only: {name}"
+
+    def test_batch_fallback_stays_in_pool(self):
+        """batch降级链同样不得跨池"""
+        decision = route("批量摘要生成", Budget.FREE, Scenario.BATCH)
+        registry = get_registry()
+        for name in decision.fallback_chain:
+            p = registry.get_provider(name)
+            assert p is not None
+            assert p.pool in ('batch', 'both')
+
+    def test_free_interactive_warns_slow(self):
+        """free+interactive触发慢警告"""
+        decision = route("解释量子计算", Budget.FREE, Scenario.INTERACTIVE)
+        assert "警告" in decision.reason or "慎用" in decision.reason
+
+    def test_batch_prefers_lowest_cost(self):
+        """batch场景按cost_tier升序（零边际优先）"""
+        decision = route("批量翻译任务", Budget.QUALITY, Scenario.BATCH)
+        # quality档batch首选应为cost_tier=0本地（qualtiy在batch内不再放宽成本）
+        assert decision.provider.cost_tier <= 1
+
+    def test_scenario_default_interactive(self):
+        """scenario缺省=interactive，v0行为兼容"""
+        decision = route("你好")
+        assert decision.scenario == 'interactive'
+
+    def test_fallback_respects_scenario_models(self):
+        """降级到多模型执行器时选场景内模型（executor层）"""
+        mock_ok = Mock()
+        mock_ok.status_code = 200
+        mock_ok.json.return_value = {
+            'choices': [{'message': {'content': 'ok'}}],
+            'usage': {'prompt_tokens': 1, 'completion_tokens': 1}
+        }
+        mock_post = Mock(side_effect=[Mock(status_code=500), mock_ok])
+        with patch('requests.post', mock_post):
+            registry = get_registry()
+            ds = registry.get_provider('deepseek')
+            decision = Decision(
+                provider=ds, model='deepseek-chat',
+                reason='测试场景降级', fallback_chain=['new-api'],
+                scenario='batch'
+            )
+            executor = Executor()
+            result, trace = executor.execute(decision, "测试")
+            assert result.success is True
+            # 降级到new-api时，batch场景应选中:free模型
+            assert result.model.endswith(':free')
+
+    def test_v05_ledger_fields_backward_compatible(self):
+        """v0旧账本（无scenario/pool字段）读取与统计不报错"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / 'test_ledger.jsonl'
+            ledger = Ledger(ledger_path)
+            v0_record = {
+                'timestamp': time.time(), 'provider': 'test', 'model': 'm',
+                'prompt_tokens': 1, 'completion_tokens': 2, 'latency_ms': 5,
+                'budget': 'free', 'result': 'ok', 'query_preview': 'v0记录'
+            }
+            ledger.append(v0_record)
+            stats = ledger.get_stats()
+            assert stats['total'] == 1
+            assert 'interactive' in stats['scenarios']  # v0记录归入interactive
+            records = ledger.read_records()
+            assert 'scenario' not in records[0]  # 旧记录原样保留
+
+    def test_v05_ledger_scenario_stats(self):
+        """分场景统计：量/成功/均延迟"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / 'test_ledger.jsonl'
+            ledger = Ledger(ledger_path)
+            for scn in ('interactive', 'batch'):
+                ledger.append({
+                    'timestamp': time.time(), 'provider': 't', 'model': 'm',
+                    'prompt_tokens': 1, 'completion_tokens': 1,
+                    'latency_ms': 100 if scn == 'batch' else 10,
+                    'budget': 'free', 'scenario': scn, 'pool': 'both',
+                    'route_type': 'model', 'result': 'ok', 'query_preview': 'x'
+                })
+            stats = ledger.get_stats()
+            assert stats['scenarios']['interactive']['count'] == 1
+            assert stats['scenarios']['batch']['count'] == 1
+            assert stats['scenarios']['batch']['avg_latency_ms'] == 100
+            assert stats['scenarios']['interactive']['avg_latency_ms'] == 10
+
+    def test_openrouter_headers_and_key(self):
+        """openrouter执行器：key解析自env、extra_headers存在"""
+        registry = get_registry()
+        orp = registry.get_provider('openrouter')
+        assert orp is not None
+        assert orp.pool == 'batch'
+        assert orp.extra_headers.get('X-Title') == 'openllm-router'
+        # key解析路径正确即可（值不打印不落盘）
+        key = orp.get_key()
+        assert isinstance(key, str)
+
+    def test_local_provider_never_in_batch_or_interactive_conflict(self):
+        """local=true的ollama在两池均可用（pool=both）"""
+        registry = get_registry()
+        ollama = registry.get_provider('ollama')
+        assert ollama.local is True
+        assert ollama.pool == 'both'
+        assert len(ollama.interactive_models()) > 0
+        assert len(ollama.batch_models()) > 0
 
 
 # Live冒烟测试（默认跳过，需要环境变量RUN_LIVE_TESTS=1）

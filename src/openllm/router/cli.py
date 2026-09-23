@@ -65,7 +65,15 @@ def print_stats(ledger: Ledger):
     for provider, p_stats in stats['providers'].items():
         success_rate = p_stats['success'] / p_stats['count'] if p_stats['count'] > 0 else 0
         print(f"  {provider}: {p_stats['count']}次调用, 成功率{success_rate:.2%}")
-    
+
+    # v0.5: 分场景统计
+    scenarios = stats.get('scenarios', {})
+    if scenarios:
+        print(f"\n--- 分场景统计（延迟形态） ---")
+        for scn, s_stats in scenarios.items():
+            success_rate = s_stats['success'] / s_stats['count'] if s_stats['count'] > 0 else 0
+            print(f"  {scn}: {s_stats['count']}次, 成功率{success_rate:.2%}, 平均延迟{s_stats['avg_latency_ms']}ms")
+
     # Shannon熵
     h_value = h_of(100, ledger)
     distribution = get_distribution(100, ledger)
@@ -91,11 +99,15 @@ def main():
     )
     
     parser.add_argument('query', nargs='?', help='要处理的查询')
-    parser.add_argument('--budget', '-b', 
+    parser.add_argument('--budget', '-b',
                        choices=['free', 'balanced', 'quality'],
                        default='balanced',
                        help='预算档位 (默认: balanced)')
-    parser.add_argument('--stats', '-s', 
+    parser.add_argument('--scenario', '-S',
+                       choices=['interactive', 'batch'],
+                       default='interactive',
+                       help='场景档位/延迟形态 (默认: interactive；batch=夜间批处理走免费慢池)')
+    parser.add_argument('--stats', '-s',
                        action='store_true',
                        help='显示账本统计')
     parser.add_argument('--temperature', '-t',
@@ -122,20 +134,22 @@ def main():
         sys.exit(1)
     
     # 路由决策
+    from .router import Scenario
     budget = format_budget(args.budget)
-    decision = route(args.query, budget)
-    
+    scenario = Scenario(args.scenario)
+    decision = route(args.query, budget, scenario)
+
     print_decision(decision)
-    
+
     # 执行请求
-    result, trace = executor.execute(decision, args.query, 
+    result, trace = executor.execute(decision, args.query,
                                     temperature=args.temperature,
                                     max_tokens=args.max_tokens)
-    
+
     # 打印结果
     print_result(result)
-    
-    # 记录账本
+
+    # 记录账本（v0.5: 增 scenario/pool/route_type 字段）
     record = {
         'timestamp': __import__('time').time(),
         'provider': result.provider_name,
@@ -144,6 +158,9 @@ def main():
         'completion_tokens': result.completion_tokens,
         'latency_ms': result.latency_ms,
         'budget': budget.value,
+        'scenario': decision.scenario,
+        'pool': getattr(decision.provider, 'pool', 'both'),
+        'route_type': 'model',
         'result': 'ok' if result.success else f'fail:{result.error}',
         'query_preview': args.query[:80]
     }

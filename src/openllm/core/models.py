@@ -38,9 +38,16 @@ class Context:
     ior_hints: list = field(default_factory=list)
     # 遗忘维 ForgettingCurve：主题衰减打分提示（长时遗忘）
     forgetting_hints: list = field(default_factory=list)
+    # provenance信任标签（宪章v0.5§五·2026-09-16接线）：块名→trust五级
+    # trust ∈ {creator, user, tool_output, web, mixed}；固化门以trust<τ置零Score
+    provenance: dict = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
     # DR-20260829-01 P0-C: 身份注入prompt
     identity_block: str = ""
+    # DR-20260917-04: 本会话对话历史（[{role, content}, ...]，最近的在最后）
+    # 修「每轮冷启动·刚说的话就忘」：CLI 逐轮积累，_perceive 注入到 ctx，
+    # octopus.think 渲染进 prompt。空列表=首轮（行为与修前一致）。
+    history: list = field(default_factory=list)
 
 @dataclass
 class Prediction:

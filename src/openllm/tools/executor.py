@@ -71,7 +71,9 @@ class ToolRegistry:
             return ToolResult(
                 tool_name=tool_name,
                 success=False,
-                error=f"未知工具: {tool_name}。可用工具: {list(self._tools.keys())}",
+                error=f"未知工具: {tool_name}。可用: {list(self._tools.keys())}。"
+                  f"若有tool_load工具，可 tool_load(query='{tool_name}') 搜索池中候补，"
+                  f"或 tool_load(name='准确名') 装载。",
             )
 
         # Verify-before-complete: 写操作前验证

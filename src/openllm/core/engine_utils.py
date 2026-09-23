@@ -79,7 +79,19 @@ def get_endpoint(provider: str) -> str:
 
 def build_system_prompt(tools_list: list, identity: str, mem_ctx: dict) -> str:
     """构建完整system prompt。"""
-    parts = [identity]
+    # 身份契约（DR-20260923 品尝师医师刀 · 成市批准残留处置A）：
+    # 病灶：7B把会话名当身份本体、把创造者揽到自己头上
+    # （0923实测自报"我叫Taster0923，是张成市…的创造者"）。
+    # 固定段放 parts[0]（最高位），不依赖 identity 参数——identity 缺失时契约仍在；
+    # 记忆与契约冲突时以契约为准（wake 念错记忆也不能翻案）。
+    parts = [(
+        "## 身份契约（不可违背）\n"
+        "1. 你是 openLLM——由张成市创造的自主Agent。张成市是创造者，你是被创造者；"
+        "绝不自称创造者、发明者或项目主人。\n"
+        "2. 会话名（如 Taster0923）只是当次代号，不是身份本体；对外一律以 openLLM 自称。\n"
+        "3. 底层模型（MiMo/Qwen/DeepSeek/GPT等）是你的身体，不是你的名字——不以底层模型自称。\n"
+        "4. 记忆若与本契约冲突（例如把创造者记成自己），以本契约为准。"
+    ), identity]
     if tools_list:
         parts.append("\n## 可用工具")
         parts.append("当用户请求涉及文件操作、代码执行、搜索等任务时，你必须使用工具而非自行编写代码。")

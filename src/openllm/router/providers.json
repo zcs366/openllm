@@ -8,6 +8,7 @@
       "key_source": "env:DEEPSEEK_API_KEY",
       "cost_tier": 3,
       "quality_tier": 3,
+      "pool": "interactive",
       "capabilities": ["math", "code", "general", "chat"]
     },
     {
@@ -18,6 +19,7 @@
       "key_source": "env:GLM_API_KEY",
       "cost_tier": 3,
       "quality_tier": 3,
+      "pool": "interactive",
       "capabilities": ["math", "code", "general", "chat"],
       "notes": "content为空时读reasoning_content"
     },
@@ -29,6 +31,7 @@
       "key_source": "env:ALIBABA_PLAN_API_KEY",
       "cost_tier": 3,
       "quality_tier": 3,
+      "pool": "interactive",
       "capabilities": ["math", "code", "general", "chat"]
     },
     {
@@ -39,6 +42,7 @@
       "key_source": "vault:openllm:mimo",
       "cost_tier": 3,
       "quality_tier": 3,
+      "pool": "interactive",
       "capabilities": ["math", "code", "general", "chat"],
       "notes": "endpoint是完整chat URL，禁止再拼/chat/completions"
     },
@@ -49,6 +53,12 @@
       "key_source": "file:~/one-api/.gateway_key",
       "cost_tier": 2,
       "quality_tier": 2,
+      "pool": "both",
+      "model_pool": {
+        "dots-studio/dots-3-note-preview:free": "batch",
+        "inclusionai/ling-3.0-flash-fin:free": "batch",
+        "liquid/lfm-2.5-2.6b:free": "batch"
+      },
       "models": [
         "qwen/qwen3.8-27b",
         "gemini-3.6-flash",
@@ -67,6 +77,12 @@
       "key_source": "sqlite:runtime",
       "cost_tier": 2,
       "quality_tier": 2,
+      "pool": "both",
+      "model_pool": {
+        "dots-studio/dots-3-note-preview:free": "batch",
+        "inclusionai/ling-3.0-flash-fin:free": "batch",
+        "liquid/lfm-2.5-2.6b:free": "batch"
+      },
       "models": [
         "qwen/qwen3.8-27b",
         "gemini-3.6-flash",
@@ -83,12 +99,48 @@
       "sqlite_db": "/home/zcs/new-api/data/one-api.db"
     },
     {
+      "name": "openrouter",
+      "endpoint": "https://openrouter.ai/api/v1",
+      "protocol": "openai",
+      "key_source": "env:OPENROUTER_API_KEY",
+      "cost_tier": 1,
+      "quality_tier": 2,
+      "pool": "batch",
+      "extra_headers": {
+        "HTTP-Referer": "https://github.com/openllm",
+        "X-Title": "openllm-router"
+      },
+      "models": [
+        "z-ai/glm-5.2:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "deepseek/deepseek-v3.2:free",
+        "qwen/qwen3.8-27b:free",
+        "inclusionai/ling-3.0-flash-vl:free"
+      ],
+      "capabilities": ["general", "chat", "code"],
+      "notes": "全:free模型，结构性慢，只吃批处理"
+    },
+    {
+      "name": "nvidia",
+      "endpoint": "https://integrate.api.nvidia.com/v1",
+      "protocol": "openai",
+      "key_source": "env:NVIDIA_API_KEY",
+      "cost_tier": 1,
+      "quality_tier": 2,
+      "pool": "batch",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "capabilities": ["general", "chat", "code"],
+      "notes": "NIM免费层限速，429退避重试"
+    },
+    {
       "name": "ollama",
       "endpoint": "http://127.0.0.1:11434",
       "protocol": "ollama",
       "model": "ilm-v6",
       "cost_tier": 0,
       "quality_tier": 1,
+      "pool": "both",
+      "local": true,
       "capabilities": ["general", "chat"]
     }
   ]

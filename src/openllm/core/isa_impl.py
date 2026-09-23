@@ -5,6 +5,22 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Optional
 from .models import *
+
+# DR-20260917-01（品尝师首诊刀①）：工具清单正源。
+# 心跳路径(isa_impl.build_context)与CLI快路径(cli/main)都从这里取，
+# 保证无论走哪条路，模型都"知道自己有手"。
+# 注意顺序与 FULL_TOOLS 切片逻辑耦合：FULL_TOOLS 后两项是需要provider可用的增强工具。
+BASE_TOOLS = ["read_file", "search_files"]
+FULL_TOOLS = ["read_file", "search_files", "write_file", "terminal"]
+
+# 工具一句话描述（注入prompt用，与octopus.py tools_ctx同源）
+TOOL_DESCRIPTIONS = {
+    "read_file": "读取文件内容(path)",
+    "write_file": "写入文件(path, content)",
+    "search_files": "按文件名模式搜索(pattern)",
+    "terminal": "执行shell命令(command)",
+}
+
 class ISA:
     """UI层 + Context构建——用户交互入口"""
     
@@ -131,9 +147,11 @@ class ISA:
                 trace_degradation("ISA", "build_context", _e)
         
         # ③ 工具 — 动态获取
-        tools = ["read_file", "search_files"]
+        # DR-20260917-01（品尝师首诊刀①）：工具清单正源——快路径(CLI)/心跳(octopus)
+        # 统一引用下方模块级常量，防三处漂移导致"模型不知道自己有手"。
+        tools = list(BASE_TOOLS)
         if octopus and octopus.left.provider._available:
-            tools.extend(["write_file", "terminal"])
+            tools.extend(FULL_TOOLS[len(BASE_TOOLS):])
         
         # ④ 因果提示 — causal_memory结构化检索 + heuristics
         causal_hints = []
@@ -239,6 +257,25 @@ class ISA:
         else:
             identity_block += "你的身份是openLLM。"
 
+        # provenance信任标签（宪章v0.5§五接线·2026-09-16）：七要素逐块打标
+        # 依据：通道合规体检报告④"注入面无trust分级"修补项#3
+        # trust语义：creator=框架硬编码/用户配置可审计；user=用户自身数据；
+        #           tool_output=工具实测；web=外部检索（最低信任，禁触发固化）
+        provenance = {
+            "identity": "creator",           # 硬编码身份字典（isa_impl L86-105）
+            "memory.session_turns": "user",  # 用户会话摘要
+            "memory.recalled": "mixed",      # MemoryBus四源混合（Δ胶囊/jiak/RECALL/因果）
+            "memory.fallback_recall": "user",
+            "tools": "creator",              # 工具能力清单（框架配置）
+            "causal_hints": "mixed",         # causal_memory（工具实测）+heuristics（框架）混合
+            "d0_report": "creator",          # 内部感知
+            "risk_context": "creator",
+            "search_results": "web",         # 触手脑检索——最低信任级
+            "ior_hints": "creator",
+            "forgetting_hints": "creator",
+            "identity_block": "creator",
+        }
+
         return Context(
             user_message=msg.text,
             identity=identity,
@@ -251,6 +288,7 @@ class ISA:
             ior_hints=ior_hints,
             forgetting_hints=forgetting_hints,
             identity_block=identity_block,
+            provenance=provenance,
         )
     
     def respond(self, text: str, phase_times: dict = None):

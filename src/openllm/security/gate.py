@@ -157,6 +157,18 @@ class PermissionGate:
         "octopus_health": PermissionLevel.READ_ONLY,
         "send_message": PermissionLevel.NETWORK,
         "publish": PermissionLevel.NETWORK,
+        # 2026-09-22 pi工具池：元工具=会话内改注册表面，对齐self_modify的L2定位
+        "tool_load": PermissionLevel.LOCAL_WRITE,
+        "tool_unload": PermissionLevel.LOCAL_WRITE,
+        # 2026-09-22 库存武器上膛：查/摘只读，写/推进本地写（storage在~/.openllm/inventory/）
+        "pk_search": PermissionLevel.READ_ONLY,
+        "pk_summary": PermissionLevel.READ_ONLY,
+        "rl_status": PermissionLevel.READ_ONLY,
+        "ee_summary": PermissionLevel.READ_ONLY,
+        "se_confidence": PermissionLevel.READ_ONLY,
+        "rl_step": PermissionLevel.LOCAL_WRITE,
+        "ee_hypothesis": PermissionLevel.LOCAL_WRITE,
+        "se_predict": PermissionLevel.LOCAL_WRITE,
         # L4 管理模式
         "delete_file": PermissionLevel.ADMIN,
         "delete_audit_entry": PermissionLevel.ADMIN,

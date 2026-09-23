@@ -90,6 +90,12 @@ class DeepSeekProvider:
 
     def __init__(self, config: ModelConfig):
         self.config = config
+        # DR-20260923（品尝师医师刀）: _available 语义对齐 provider_impl.LLMProvider。
+        # CLI快路径读 getattr(provider, "_available", False)——本族provider此前无此
+        # 属性 → 恒 False → 真实可用的 provider 也被降级成 BASE_TOOLS（同病四灶：
+        # Anthropic/Gemini 同批补）。localhost/127.0.0.1 免 key 也算可用（ollama本地通道）。
+        _ep = config.endpoint or ""
+        self._available = bool(config.api_key) or "localhost" in _ep or "127.0.0.1" in _ep
         self._session = requests.Session()
         self._session.headers.update({
             "Authorization": f"Bearer {config.api_key}",
@@ -146,6 +152,44 @@ class DeepSeekProvider:
         answer = (text[:m.start()] + text[m.end():]).strip()
         return answer, reasoning
 
+    @staticmethod
+    def _extract_error_detail(resp) -> str:
+        """从失败响应体里挖出服务端原话（2026-09-16 医师接骨 · P0-2）。
+
+        旧行为：`raise_for_status()` 抛出的异常 str 只有
+        "400 Client Error: Bad Request for url: ..."，服务端真正的原因
+        （如 "request (4581 tokens) exceeds the available context size (4096
+        tokens)"）藏在 body 里，**全程不露面**。后果不是"少了一条日志"——而是
+        P0-1「苏醒即失语」被误判成"模型不行/网络抖动"，真实根因被错误信息掩埋。
+
+        兼容三类形态：{"error": {"message": ...}} / {"error": "str"} /
+        ollama 那种把 error.message 再套一层 JSON 字符串的形态。
+        """
+        if resp is None:
+            return "(无响应体)"
+        try:
+            data = resp.json()
+        except Exception:
+            return (getattr(resp, "text", "") or "")[:400] or "(空响应体)"
+        if not isinstance(data, dict):
+            return str(data)[:400]
+        err = data.get("error")
+        if isinstance(err, dict):
+            msg = err.get("message") or json.dumps(err, ensure_ascii=False)
+        elif err:
+            msg = str(err)
+        else:
+            msg = json.dumps(data, ensure_ascii=False)
+        # ollama /v1 把内层错误再序列化成字符串，剥一层
+        try:
+            inner = json.loads(msg)
+            if isinstance(inner, dict) and inner.get("error"):
+                e2 = inner["error"]
+                msg = e2.get("message") if isinstance(e2, dict) else str(e2)
+        except Exception:
+            pass
+        return str(msg)[:400]
+
     def _build_messages(self, messages: list[ChatMessage], system: Optional[str] = None) -> list[dict]:
         """构建消息列表。"""
         result = []
@@ -188,9 +232,18 @@ class DeepSeekProvider:
             # 成本跟踪：写入model trace
             self._record_model_trace(response, usage)
             return response
+        except requests.exceptions.HTTPError as e:
+            # 2026-09-16 医师接骨（P0-2）：4xx/5xx 必须带上服务端原话。
+            detail = self._extract_error_detail(getattr(e, "response", None))
+            code = getattr(getattr(e, "response", None), "status_code", "?")
+            return ModelResponse(
+                content=f"[API错误 {code}] {detail}",
+                model="error",
+                latency_ms=(time.time() - t0) * 1000,
+            )
         except requests.exceptions.RequestException as e:
             return ModelResponse(
-                content=f"[API错误] {e}",
+                content=f"[API错误] {type(e).__name__}: {e}",
                 model="error",
                 latency_ms=(time.time() - t0) * 1000,
             )
@@ -281,9 +334,18 @@ class DeepSeekProvider:
             # 成本跟踪：流式模式无usage数据，只记录latency
             self._record_model_trace(response, {})
             return response
+        except requests.exceptions.HTTPError as e:
+            # 2026-09-16 医师接骨（P0-2）：流式同样不许把错误降格成一句 status。
+            detail = self._extract_error_detail(getattr(e, "response", None))
+            code = getattr(getattr(e, "response", None), "status_code", "?")
+            return ModelResponse(
+                content=f"[流式错误 {code}] {detail}",
+                model="error",
+                latency_ms=(time.time() - t0) * 1000,
+            )
         except requests.exceptions.RequestException as e:
             return ModelResponse(
-                content=f"[流式错误] {e}",
+                content=f"[流式错误] {type(e).__name__}: {e}",
                 model="error",
                 latency_ms=(time.time() - t0) * 1000,
             )
@@ -315,6 +377,153 @@ class DeepSeekProvider:
             logger.debug(f"cost跟踪跳过: {e}")
 
 
+class OllamaProvider(DeepSeekProvider):
+    """Ollama Provider —— 走**原生 /api/chat**（2026-09-16 医师接骨 · P0-1）。
+
+    ■ 为什么不用 /v1/chat/completions（OpenAI 兼容端点）
+      该端点**忽略请求级 num_ctx**。实测（system 10488 字符 ≈ 5735 tokens）：
+
+          /v1        + options.num_ctx=8192    → 400 exceed_context_size_error
+          /v1        + options.num_ctx=32768   → 400（同样被忽略）
+          /api/chat  + options.num_ctx=8192    → 200 ✅
+          /api/chat  + options.num_ctx=16384   → 200 ✅
+
+      而服务侧默认 num_ctx = 4096（模型自身 context_length = 32768，默认值陷阱）。
+
+    ■ 病象「苏醒即失语」
+      wake() 注入 system prompt(2621字符) 后，system + 27 个工具 schema
+      ≈ 4581 tokens > 4096 → **每一次 chat 都 400**。唤醒越成功，越说不出话。
+      开发者跑单测先 chat（无 system）不触发；真实用户开机器先 wake，第一脚就踩。
+
+    ■ 为什么继承 DeepSeekProvider
+      engine._call_model 用 `isinstance(provider, DeepSeekProvider)` 决定是否下发
+      tools 声明。不继承则该分支失效，工具能力静默消失。
+    """
+
+    # 默认上下文窗口：覆盖 system prompt + 全量工具 schema 的常见水位。
+    # 可用 OPENLLM_OLLAMA_NUM_CTX 覆盖；服务侧 OLLAMA_CONTEXT_LENGTH 优先。
+    DEFAULT_NUM_CTX = int(os.environ.get("OPENLLM_OLLAMA_NUM_CTX", "16384"))
+
+    def __init__(self, config: "ModelConfig"):
+        super().__init__(config)
+        self.config.endpoint = self._to_native_endpoint(config.endpoint)
+        self.num_ctx = int(os.environ.get("OLLAMA_CONTEXT_LENGTH", str(self.DEFAULT_NUM_CTX)))
+
+    @staticmethod
+    def _to_native_endpoint(endpoint: str) -> str:
+        """OpenAI 兼容端点 → 原生端点（保留 host，换路径）。"""
+        ep = (endpoint or "").rstrip("/")
+        if not ep:
+            return "http://localhost:11434/api/chat"
+        if "/v1/chat/completions" in ep:
+            return ep.split("/v1/chat/completions")[0] + "/api/chat"
+        if ep.endswith("/v1"):
+            return ep[:-3] + "/api/chat"
+        if ep.endswith("/api/chat"):
+            return ep
+        return ep + "/api/chat"
+
+    def _native_payload(self, payload: dict) -> dict:
+        """OpenAI 风格 payload → 原生 payload（核心：补 options.num_ctx）。"""
+        opts = {
+            "num_ctx": self.num_ctx,
+            "temperature": payload.get("temperature", 0.7),
+        }
+        if payload.get("max_tokens"):
+            # 原生端点用 num_predict（OpenAI 叫 max_tokens）
+            opts["num_predict"] = payload["max_tokens"]
+        out = {
+            "model": payload.get("model"),
+            "messages": payload.get("messages", []),
+            "stream": payload.get("stream", False),
+            "options": opts,
+        }
+        if payload.get("tools"):
+            out["tools"] = payload["tools"]
+        return out
+
+    @staticmethod
+    def _native_usage(data: dict) -> dict:
+        return {
+            "prompt_tokens": data.get("prompt_eval_count", 0),
+            "completion_tokens": data.get("eval_count", 0),
+        }
+
+    def _sync_chat(self, payload: dict, t0: float) -> ModelResponse:
+        try:
+            resp = self._session.post(
+                self.config.endpoint, json=self._native_payload(payload), timeout=120,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            msg = data.get("message") or {}
+            answer, inline_think = self._split_reasoning_tag(msg.get("content") or "")
+            usage = self._native_usage(data)
+            response = ModelResponse(
+                content=answer,
+                model=data.get("model", self.config.model),
+                usage=usage,
+                latency_ms=(time.time() - t0) * 1000,
+                finish_reason="stop" if data.get("done", True) else "length",
+                tool_calls=msg.get("tool_calls") or None,
+                reasoning=inline_think,
+            )
+            self._record_model_trace(response, usage)
+            return response
+        except requests.exceptions.HTTPError as e:
+            detail = self._extract_error_detail(getattr(e, "response", None))
+            code = getattr(getattr(e, "response", None), "status_code", "?")
+            return ModelResponse(content=f"[API错误 {code}] {detail}", model="error",
+                                 latency_ms=(time.time() - t0) * 1000)
+        except requests.exceptions.RequestException as e:
+            return ModelResponse(content=f"[API错误] {type(e).__name__}: {e}", model="error",
+                                 latency_ms=(time.time() - t0) * 1000)
+
+    def _stream_chat(self, payload: dict, on_token: Callable[[str], None], t0: float) -> ModelResponse:
+        """原生流式：NDJSON 逐行（不是 SSE 的 `data: ` 前缀）。"""
+        full_content = ""
+        usage: dict = {}
+        try:
+            resp = self._session.post(
+                self.config.endpoint, json=self._native_payload(payload),
+                timeout=120, stream=True,
+            )
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line.decode("utf-8"))
+                except Exception:
+                    continue
+                tok = (data.get("message") or {}).get("content") or ""
+                if tok:
+                    full_content += tok
+                    on_token(tok)
+                if data.get("done"):
+                    usage = self._native_usage(data)
+                    break
+            answer, inline_think = self._split_reasoning_tag(full_content)
+            response = ModelResponse(
+                content=answer,
+                model=self.config.model,
+                usage=usage,
+                latency_ms=(time.time() - t0) * 1000,
+                finish_reason="stop",
+                reasoning=inline_think,
+            )
+            self._record_model_trace(response, usage)
+            return response
+        except requests.exceptions.HTTPError as e:
+            detail = self._extract_error_detail(getattr(e, "response", None))
+            code = getattr(getattr(e, "response", None), "status_code", "?")
+            return ModelResponse(content=f"[流式错误 {code}] {detail}", model="error",
+                                 latency_ms=(time.time() - t0) * 1000)
+        except requests.exceptions.RequestException as e:
+            return ModelResponse(content=f"[流式错误] {type(e).__name__}: {e}", model="error",
+                                 latency_ms=(time.time() - t0) * 1000)
+
+
 # ── Anthropic (Claude) Provider ─────────────────────
 
 class AnthropicProvider:
@@ -328,6 +537,7 @@ class AnthropicProvider:
     def __init__(self, config: ModelConfig):
         self.config = config
         self._session = requests.Session()
+        self._available = bool(config.api_key)  # DR-20260923 同批补缺（CLI恒降级病）
         self._session.headers.update({
             "x-api-key": config.api_key,
             "anthropic-version": self.API_VERSION,
@@ -424,6 +634,7 @@ class GeminiProvider:
         self.config = config
         self._session = requests.Session()
         self._api_key = config.api_key
+        self._available = bool(config.api_key)  # DR-20260923 同批补缺（CLI恒降级病）
 
     def chat(
         self,
@@ -535,11 +746,20 @@ def create_provider(provider_type: str = DEFAULT_PROVIDER, **kwargs) -> Any:
         return GeminiProvider(config)
 
     if provider_type == "ollama":
+        # 2026-09-16 医师接骨（P0-1）：改走**原生端点**。
+        # 原实现复用 DeepSeekProvider 打 /v1/chat/completions，而该端点忽略
+        # 请求级 num_ctx（实测 8192/32768 均 400）→ wake 注入 system 后
+        # system+tools 超服务侧默认 4096，每次 chat 必 400（"苏醒即失语"）。
+        # OllamaProvider 继承 DeepSeekProvider，保留 engine 的 tools 下发分支。
         config.endpoint = kwargs.get("endpoint", "http://localhost:11434/v1/chat/completions")
         config.api_key = kwargs.get("api_key", "ollama")
         config.model = kwargs.get("model", "qwen3.5:9b")
-        logger.info(f"Ollama provider: {config.model} @ {config.endpoint}")
-        return DeepSeekProvider(config)
+        provider = OllamaProvider(config)
+        logger.info(
+            f"Ollama provider: {config.model} @ {provider.config.endpoint} "
+            f"(num_ctx={provider.num_ctx})"
+        )
+        return provider
 
     if provider_type == "mimo":
         config.endpoint = kwargs.get("endpoint", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions")

@@ -14,8 +14,8 @@ from typing import Optional
 from openllm.core.models import (Message, Context, Prediction, RiskAssessment,
                                   Proposal, Critique, Decision, ActionResult)
 from openllm.core.protocol import HeartbeatContext
+from openllm.core.session import TurnStatus
 from .awakening import AwakeningProtocol
-
 
 def execute_tick(agent, msg: Message):
     """5阶段心跳：PERCEIVE→DECIDE→EXECUTE→LEARN→FEEDBACK
@@ -86,7 +86,12 @@ def execute_tick(agent, msg: Message):
         return hc
 
     except Exception as e:
-        turn.fail(str(e))
+        # DR-20260917-01：fail/complete都有状态机守卫，turn已终结时不得二次改状态，
+        # 否则此处异常会顶掉真实异常（traceback被吞、CLI直接退出）。
+        if getattr(turn, "status", None) == TurnStatus.ACTIVE.value:
+            turn.fail(str(e))
+        else:
+            agent.iko.trace("tick", "error_after_complete", detail=str(e)[:100])
         raise
 
 
@@ -97,6 +102,12 @@ def _perceive(agent, msg, hc, turn):
     # 1.1 记忆上下文
     t1 = time.time()
     ctx = agent.isa.build_context(msg, agent.session, agent.octopus, agent.ios)
+    # DR-20260917-04：注入本会话对话历史（修「刚说的话就忘」）。
+    # _pending_history 由 run_once/_execute_tick 逐轮置入；空=首轮。
+    try:
+        ctx.history = list(getattr(agent, "_pending_history", None) or [])
+    except Exception:
+        pass
     hc.memory = getattr(ctx, 'memory', {}) or {}
     hc.identity = getattr(ctx, 'identity', {}) or {}
     turn.trace_phase("context", "ok", duration_ms=(time.time()-t1)*1000)
@@ -356,7 +367,10 @@ def _handle_tool_validation(agent, decision, result, turn):
             if agent.isa.mode != "silent":
                 agent.isa.respond(agent._last_output)
             turn.add_action("validate_blocked", _fail_entry["reason"])
-            turn.complete()
+            # DR-20260917-01：此处提前终结本turn，外层_learn(492)会再次complete
+            # → "cannot complete from status complete" 崩溃。幂等防护：仅在ACTIVE时结束。
+            if getattr(turn, "status", None) == TurnStatus.ACTIVE.value:
+                turn.complete()
             return
         if _tv_report.should_retry:
             turn.trace_phase("validate_retry", "warn", detail="工具结果需重试")
@@ -489,7 +503,10 @@ def _learn(agent, hc, turn):
             agent.isa.respond(result.output)
 
     turn.add_action("execute", result.output[:100])
-    turn.complete()
+    # DR-20260917-01：_execute提前终结turn（cap拒绝303/验证拦截359）后仍会走到这里，
+    # 二次complete曾致状态机异常+CLI崩溃。幂等：仅ACTIVE才完结。
+    if getattr(turn, "status", None) == TurnStatus.ACTIVE.value:
+        turn.complete()
 
     if agent._tick_count % 10 == 0:
         agent.session.checkpoint()

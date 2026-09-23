@@ -1,11 +1,65 @@
 """pytest配置。"""
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
 # 确保openllm包可导入
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+# ── 真实 HOME 全局隔离（2026-09-16 医师接骨 · P1-2）────────────────────────
+# ★ 必须在任何 openllm 模块导入**之前**执行。
+#   多数落点是**模块级常量**（`Path.home() / ".openllm" / ...` 在导入期求值），
+#   等到 fixture 里再 monkeypatch 就已经晚了——常量早已固化。
+#
+# 病（实测）：跑一次全量回归就往**用户真实记忆库**写测试数据 ——
+#   ~/.openllm/memory/ 共 960 个 json，其中 216 个是 `conv-turn-N` /
+#   `key-decision-N` / `测试统一记忆系统` 之类的垃圾，时间戳精确对应回归时刻。
+#   conftest 此前只钉了 causal_store 与 ios_audit_dirs，**唯独没钉 HOME**。
+#
+# 判据（守卫见 _assert_home_isolated）：Path.home() 必须落在 openllm-pytest-home-*。
+_REAL_HOME = Path(os.environ.get("HOME") or str(Path.home()))  # 打桩前先记真实 HOME
+_FAKE_HOME = Path(tempfile.mkdtemp(prefix="openllm-pytest-home-"))
+(_FAKE_HOME / ".openllm" / "memory").mkdir(parents=True, exist_ok=True)
+
+# ★ 家目录下的**外部资源**一律软链保留，只把 `~/.openllm` 换成空目录。
+#   本次要隔离的是 openLLM 自己的落点，**不是**剥夺测试对其它资源的访问。
+#   实证（都是被这条边界卡出来的）：
+#     · 给 .hermes 建空目录 → 13 个用例失败（jiak 库 / DPAPI 密钥库不可达）
+#     · projects 不可达      → 3 个用例失败（test_ilm_pipeline_migration 检查
+#                              /home/zcs/projects/isa/ilm 是否存在）
+#   软链 = 这些路径行为与打桩前**完全一致**，同时 ~/.openllm 被完整隔离。
+for _name in (".hermes", "projects", ".cache", ".local", ".config", ".io-s"):
+    _src = _REAL_HOME / _name
+    _dst = _FAKE_HOME / _name
+    if _src.exists() and not _dst.exists():
+        try:
+            _dst.symlink_to(_src, target_is_directory=_src.is_dir())
+        except OSError:
+            pass
+
+os.environ["HOME"] = str(_FAKE_HOME)
+# ★ 打桩成「跟随环境变量」，而不是写死返回 _FAKE_HOME。
+#   原因：测试的惯用手法是 `monkeypatch.setenv("HOME", tmp)` 来隔离——若 Path.home()
+#   被写死，这一手法全部失效（实证：test_engine_utils_warns_on_plaintext_fallback
+#   自己 setenv 到 tmp/home 写 config.json，读取端却仍拿假 HOME → 断言 '' == 'sk-FAKE'）。
+#   保留 env 语义 = 默认隔离到 _FAKE_HOME，测试可自行覆盖。
+Path.home = staticmethod(lambda: Path(os.environ.get("HOME") or str(_REAL_HOME)))
+
+
+@pytest.fixture(autouse=True)
+def _assert_home_isolated():
+    """守卫：HOME 打桩若被绕过/还原，立刻失败而不是静默污染真实记忆库。
+
+    判据放宽为「不是真实 HOME」——测试可自行 monkeypatch.setenv 到别的临时目录
+    （合法隔离），但不能是用户的真实家目录。
+    """
+    assert Path.home() != _REAL_HOME, (
+        f"HOME 隔离失效，Path.home() 回到了真实家目录 {Path.home()} —— "
+        f"测试会写进用户真实记忆库，禁止继续"
+    )
 
 
 @pytest.fixture(autouse=True)

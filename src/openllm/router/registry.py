@@ -43,7 +43,32 @@ class Provider:
         self.notes: str = config.get('notes', '')
         self.sqlite_query: str = config.get('sqlite_query', '')
         self.sqlite_db: str = config.get('sqlite_db', '')
+        # v0.5 延迟维：池归属与本地标记（注册表是宪法，router只读不硬编码）
+        self.pool: str = config.get('pool', 'both')  # interactive | batch | both
+        self.model_pool: Dict[str, str] = config.get('model_pool', {})  # 模型级池覆盖
+        self.extra_headers: Dict[str, str] = config.get('extra_headers', {})
+        self.local: bool = config.get('local', False)  # local=true 禁外呼语义
         self._key: Optional[str] = None
+
+    def pool_of_model(self, model: str) -> str:
+        """模型的池归属：模型级覆盖 > 执行器级默认"""
+        return self.model_pool.get(model, self.pool)
+
+    def interactive_models(self) -> List[str]:
+        """该执行器下可服务交互场景的模型（显式指定interactive的排在both前面）"""
+        if not self.models:
+            return self.available_models if self.pool in ('interactive', 'both') else []
+        designated = [m for m in self.models if self.pool_of_model(m) == 'interactive']
+        both = [m for m in self.models if self.pool_of_model(m) == 'both']
+        return designated + both
+
+    def batch_models(self) -> List[str]:
+        """该执行器下可服务批处理场景的模型（显式指定batch的排在both前面）"""
+        if not self.models:
+            return self.available_models if self.pool in ('batch', 'both') else []
+        designated = [m for m in self.models if self.pool_of_model(m) == 'batch']
+        both = [m for m in self.models if self.pool_of_model(m) == 'both']
+        return designated + both
     
     @property
     def available_models(self) -> List[str]:

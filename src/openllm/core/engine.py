@@ -110,7 +110,12 @@ class OpenLLMEngine:
         _env_level = os.environ.get("OPENLLM_SECURITY_LEVEL")
         _level = int(_env_level) if _env_level and _env_level.isdigit() else config.security_level
         self.security.gate.current_level = PermissionLevel(_level)
-        self.tools = create_default_tools()
+        # pi思路按需装配：日常只留CORE九件（文件6+记忆3），其余18件收进能力池待命。
+        # 临时扩编：OPENLLM_TOOL_PRESET=fcrawl,ocr 或改用 presets.create_default_tools()。
+        from ..tools.presets import create_core_tools
+        _preset_env = os.environ.get("OPENLLM_TOOL_PRESET", "")
+        _extra = [t.strip() for t in _preset_env.split(",") if t.strip()]
+        self.tools = create_core_tools(extra=_extra)
         
         # ISN Tool Registry Bridge（动态工具注册）
         from ..isn.tool_registry_bridge import ToolRegistryBridge
@@ -298,19 +303,23 @@ class OpenLLMEngine:
                     endpoint = "http://localhost:11434/v1/chat/completions"
             elif p == "mimo":
                 api_key = os.environ.get("MIMO_API_KEY", "")
+                if not api_key:
+                    api_key = _key_of("mimo")
                 import json
                 cfg_path = Path.home() / ".openllm" / "config.json"
                 if cfg_path.exists():
                     cfg = json.loads(cfg_path.read_text())
                     mm = cfg.get("providers", {}).get("mimo", {})
-                    if not api_key:
-                        api_key = _key_of("mimo")
                     endpoint = mm.get("endpoint", "")
                     cfg_model = mm.get("model", "")
                     if cfg_model:
                         self.config.model = cfg_model
+                # 2026-09-22修复：keyvault兜底原先嵌在config.json存在条件里，
+                # 沙箱/无config环境永远查不到key——key解析不应依赖config文件存在。
             elif p == "qwen":
                 api_key = os.environ.get("ALIBABA_PLAN_API_KEY", "")
+                if not api_key:
+                    api_key = _key_of("qwen")
                 endpoint = ""
                 model = "qwen3.8-max"
                 # 总是从config.json读取endpoint和model（env只有key）
@@ -319,8 +328,6 @@ class OpenLLMEngine:
                 if cfg_path.exists():
                     cfg = json.loads(cfg_path.read_text())
                     qw = cfg.get("providers", {}).get("qwen", {})
-                    if not api_key:
-                        api_key = _key_of("qwen")
                     endpoint = qw.get("endpoint", "")
                     model = qw.get("model", "qwen3.8-max")
             elif p == "gateway":
@@ -607,6 +614,13 @@ class OpenLLMEngine:
         "octopus_search": "query", "octopus_self_model": "query",
         "ocr": "file_path",
         "doc_parser": "file_path",
+        # 元工具（2026-09-22 pi工具池）：位置参数归name——tool_load('fcrawl')语义
+        "tool_load": "name", "tool_unload": "name",
+        # 库存武器（2026-09-22 上膛）：主参数名对齐 inventory_tools.INVENTORY_TOOL_ARG
+        "pk_search": "query", "pk_summary": "action",
+        "rl_step": "action", "rl_status": "action",
+        "ee_hypothesis": "action", "ee_summary": "action",
+        "se_predict": "prediction", "se_confidence": "card_id",
     }
 
     # P0: 无注册schema的核心工具默认参数声明（OpenAI风格，比单参数映射更完整）
@@ -951,12 +965,23 @@ class OpenLLMEngine:
             elif "[持久记忆]" in raw_question:
                 raw_question = raw_question.split("\n\n")[-1].strip()
 
+            # DR-20260923因果stub升级（品尝师医师刀）：
+            # 旧实现 success=len(response)>10 恒真 → 373条记录 delta_magnitude 全0.0、
+            # prediction 全为占位符——因果记忆成空壳聊天日志。现改接验证管线真实票数：
+            # 失败/空回复 → success=False → delta_magnitude>0，预测按本轮路径给事前判断。
+            _vpass = getattr(report, "passed_steps", 0)
+            _vfail = getattr(report, "failed_steps", 0)
+            _vtot = getattr(report, "total_steps", 0)
             writer.record(
                 action=f"chat: {raw_question[:80]}",
-                prediction="模型会基于记忆和知识回答",
-                actual=response[:200],
-                success=bool(response and len(response) > 10),
-                context=f"tools_used={tool_rounds}",
+                prediction=(
+                    f"[工具] {tool_rounds}轮工具执行将通过验证管线({_vtot}步)"
+                    if tool_rounds > 0 else
+                    f"[LLM] 回复将非空且通过验证管线({_vtot}步)"
+                ),
+                actual=f"验证{_vpass}/{_vtot}通过(失败{_vfail}); {response[:120]}",
+                success=(_vfail == 0 and bool(response and response.strip())),
+                context=f"tools_used={tool_rounds}; verify={_vpass}/{_vtot}",
             )
         except Exception as e:
             logger.debug(f"因果记忆写入跳过: {e}")
@@ -1005,8 +1030,10 @@ class OpenLLMEngine:
         tool_patterns = [
             (r'(?:使用|调用|执行|run|use|call)\s*(\w+)\s*(?:读取|查看|搜索|执行|写入|打开|查找)',
              lambda m: self._extract_natural_args(text, m.group(1))),
-            (r'(\w+)\s*\(\s*["\']([^"\']+)["\']',  # read_file("path") 格式
-             lambda m: (m.group(1), {"path": m.group(2)}) if m.group(1) in self.tools._tools else None),
+            # read_file("path") / tool_load("fcrawl") 格式：主参数名查表，不再硬编码path
+            (r'(\w+)\s*\(\s*["\']([^"\']+)["\']',
+             lambda m: (m.group(1), {self._TOOL_ARG_MAP.get(m.group(1), "query"): m.group(2)})
+             if m.group(1) in self.tools._tools else None),
         ]
 
         for pattern, extractor in tool_patterns:

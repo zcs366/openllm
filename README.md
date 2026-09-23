@@ -183,7 +183,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 ollama pull qwen3.5:9b
 
 # 克隆项目
-cd ~/projects/openllm
+git clone https://github.com/zcs366/openllm.git && cd openllm
 ```
 
 ### 4.3 启动
@@ -396,7 +396,7 @@ config = AgentConfig(
     name="OpenLLM",              # Agent 名字
     provider="ollama",           # Provider (ollama/deepseek/openai)
     model="qwen3.5:9b",          # 模型名
-    capsule_dir="~/projects/openllm/caps",  # 记忆目录
+    capsule_dir="/path/to/openllm/caps",     # 记忆目录（⚠️ 默认值指向旧检出，见下注）
     max_context_tokens=8192,     # 最大上下文 token
     checkpoint_interval=10,      # 每N轮自动 checkpoint
     enable_io_s_checkpoint=True, # 启用 IO-S checkpoint
@@ -442,17 +442,19 @@ if provider_type == "my_provider":
 ### 8.3 运行测试
 
 ```bash
-cd ~/projects/openllm
+cd <仓库根>
 
-# 测试 Ollama 连接
-python3 test_ollama.py
+# 定向子集（快，日常用）
+PYTHONPATH=src .venv/bin/python -m pytest tests/test_memory_bus.py tests/test_awakening.py -q -p no:warnings
 
-# 测试章鱼搜索
-python3 test_octopus.py
-
-# 测试完整引擎
-python3 test_engine.py
+# 全量回归（约 12 分钟 —— 务必后台跑，前台超时会截断成"跑不完"）
+PYTHONPATH=src .venv/bin/python -m pytest tests/ -q -p no:warnings --tb=line
 ```
+
+> ⚠️ **测试隔离（2026-09-16 起）**：`tests/conftest.py` 在**导入期**就把 `HOME`
+> 钉到临时目录（`openllm-pytest-home-*`），所以跑测试**不会**写进你的真实记忆库
+> `~/.openllm/memory/`。此前不是这样——一次全量回归会往真实记忆库灌 200+ 条测试
+> json（`conv-turn-N` / `key-decision-N` 等）。若你换用其它 runner，请自行保证隔离。
 
 ---
 

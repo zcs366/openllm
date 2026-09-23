@@ -27,27 +27,49 @@ class Sandbox:
     2. Python层（路径检查）：降级模式，可被绕过但提供基础防护
     """
     
-    # 默认允许的路径
+    # 默认允许的路径（读写）
     DEFAULT_ALLOWED = [
         "~/.openllm/output/",
         "/tmp/openllm/",
     ]
+
+    # 默认允许的路径（只读）——2026-09-17 品尝师首诊刀②：
+    # openLLM 住在大仓里却读不了自己的源码（"你可以读代码吗"→[沙箱拒绝]）。
+    # 修法：只读白名单，默认放行主仓；写操作仍锁死。可用 OPENLLM_READONLY_PATHS
+    # （冒号分隔）覆盖。安全语义不变：写白名单之外一律拒绝。
+    DEFAULT_READ_ALLOWED = [
+        "/mnt/i/openllm/",
+        # DR-20260917-02：三元具神智能研究资料库（openLLM自己的成长档案）。
+        # 只开放output子树（研究产出物），hermes其余目录（配置/记忆）不放行。
+        "/mnt/i/hermes/output/",
+    ]
+
     
-    def __init__(self, allowed_paths: Optional[list[str]] = None):
+    def __init__(self, allowed_paths: Optional[list[str]] = None,
+                 readonly_paths: Optional[list[str]] = None):
         """
         初始化沙箱。
-        
+
         Args:
             allowed_paths: Agent可以读写的目录列表
+            readonly_paths: Agent只读的目录列表（写操作仍按allowed_paths检查）
         """
         if allowed_paths is None:
             allowed_paths = self.DEFAULT_ALLOWED
-        
+
         self.allowed = [Path(p).expanduser().resolve() for p in allowed_paths]
+
+        if readonly_paths is None:
+            env_ro = os.environ.get("OPENLLM_READONLY_PATHS", "")
+            readonly_paths = ([p for p in env_ro.split(":") if p.strip()]
+                              if env_ro.strip() else self.DEFAULT_READ_ALLOWED)
+        self.readonly = [Path(p).expanduser().resolve() for p in readonly_paths]
+
         self._landlock_available = False
         
         # 检查Landlock支持
         self._check_landlock()
+
     
     def _check_landlock(self):
         """检查Landlock内核支持。"""
@@ -72,14 +94,25 @@ class Sandbox:
             是否允许
         """
         target = Path(path).expanduser().resolve()
-        
-        for allowed in self.allowed:
+
+        # 写/执行：只认读写白名单（只读目录不参与）
+        if operation in ("write", "execute"):
+            for allowed in self.allowed:
+                try:
+                    target.relative_to(allowed)
+                    return True
+                except ValueError:
+                    continue
+            return False
+
+        # 读：读写白名单 ∪ 只读白名单
+        for allowed in self.allowed + self.readonly:
             try:
                 target.relative_to(allowed)
                 return True
             except ValueError:
                 continue
-        
+
         return False
     
     def apply(self) -> bool:
@@ -120,7 +153,10 @@ class Sandbox:
         """
         target = Path(path).expanduser().resolve()
         allowed_strs = [str(a) for a in self.allowed]
-        return f"路径 {target} 不在允许范围内。允许: {', '.join(allowed_strs)}"
+        ro_strs = [str(a) for a in self.readonly]
+        return (f"路径 {target} 不在允许范围内。"
+                f"可读写: {', '.join(allowed_strs)}；"
+                f"只读: {', '.join(ro_strs)}")
 
 
 # ═══════════════════════════════════════════════════════

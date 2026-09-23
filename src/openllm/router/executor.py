@@ -71,7 +71,16 @@ class Executor:
                 provider = registry.get_provider(model_name)
                 if provider is None:
                     continue
-                model_name = provider.available_models[0] if provider.available_models else provider.model
+                # v0.5: 降级时也尊重场景池——优先选场景内模型
+                from .router import Scenario
+                try:
+                    scn = Scenario(decision.scenario)
+                except ValueError:
+                    scn = Scenario.INTERACTIVE
+                scn_models = provider.batch_models() if scn == Scenario.BATCH else provider.interactive_models()
+                model_name = scn_models[0] if scn_models else (
+                    provider.available_models[0] if provider.available_models else provider.model
+                )
                 is_fallback = True
             else:
                 is_fallback = False
@@ -125,7 +134,14 @@ class Executor:
         headers = {
             'Content-Type': 'application/json'
         }
-        
+
+        # v0.5: 注册表声明的额外头（如openrouter的HTTP-Referer/X-Title）
+        headers.update(provider.extra_headers)
+
+        # 本地路由自给自足守卫：local=true执行器禁止走OpenAI协议外呼
+        if provider.local and not endpoint.startswith(('http://127.0.0.1', 'http://localhost')):
+            raise ValueError(f"执行器{provider.name}标记local=true但endpoint非本地，禁止外呼")
+
         # 获取API key
         api_key = provider.get_key()
         if api_key:

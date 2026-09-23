@@ -1,7 +1,7 @@
 """
 openLLM路由器包 - 智能选择执行器，失败自动降级，全程记账
 """
-from .router import route, Budget, Decision
+from .router import route, Budget, Scenario, Decision
 from .executor import Executor, ExecutionResult, ExecutionTrace
 from .registry import Registry, Provider, get_registry
 from .ledger import Ledger

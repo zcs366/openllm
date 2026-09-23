@@ -1,6 +1,6 @@
 from .degradation_trace import trace_degradation
 """extracted from main_loop.py"""
-import json, os, time, uuid
+import json, os, re, time, uuid
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Optional
@@ -177,41 +177,132 @@ class ISN:
         p.write_text(content, encoding="utf-8")
         return f"[写入成功] {path} ({len(content)}字符)"
     
-    def _search_files(self, pattern: str) -> str:
-        """搜索文件"""
-        import subprocess
+    # ── DR-20260917-02：危险命令判定（词元级·命令位）──
+    # 子串匹配曾误杀含"rm"的正常词（hermes/pseudo等）。词元匹配的边界：
+    # "grep rm file"中rm是搜索模式不是命令，所以只查每个命令段的首词。
+    _DANGEROUS_CMDS = {"rm", "sudo", "dd", "mkfs", "shred"}
+
+    @staticmethod
+    def _find_dangerous_cmd(command: str) -> Optional[str]:
+        """返回命令中第一个危险命令词元；安全则返回None。
+        按命令分隔符切段，只查每段首词（命令位），不误杀参数位/模式位。"""
+        import shlex
+        import re as _re
+        # 按命令边界切段（; | && || 换行）
+        _segments = _re.split(r';|\|\||\||\n|&&', command)
+        for seg in _segments:
+            try:
+                toks = shlex.split(seg)
+            except ValueError:
+                toks = seg.split()
+            if toks and toks[0].split("/")[-1] in ISN._DANGEROUS_CMDS:
+                return toks[0]
+        return None
+
+    # ── DR-20260917-03：命令意图按「命令段」判定 ──
+    # 旧实现取整条命令的首词定 op，一刀切作用于命令内所有路径，产生三类误拒：
+    #   ① `cd <只读目录> && ls` —— 首词 cd 被判成写意图，只读目录被按写检查→误拒；
+    #   ② `mkdir /tmp/openllm/x && ls /mnt/i/openllm/src` —— 读路径被按写检查→误拒；
+    #   ③ 任何"读+写"混合命令中的只读路径，一律被按写检查→误拒。
+    # 修法：命令按边界切段，逐段定意图，只检查该段内的路径。安全语义不变——
+    # 写意图段（tee/cp/sed -i/python/…）的路径仍须过写白名单；重定向目标单独强查。
+    _READONLY_CMDS = {
+        "ls", "cat", "head", "tail", "grep", "find", "wc", "file", "stat",
+        "du", "df", "ps", "pwd", "which", "date", "echo", "tree", "rg",
+        "less", "uname", "env", "whoami", "id",
+    }
+    # 中性命令：不改文件系统内容，按读检查（cd 只换当前目录，不动内容）
+    _NEUTRAL_CMDS = {"cd", "pushd", "popd", "true", ":", "export", "set", "unset"}
+    _GIT_READ_SUB = {"status", "log", "diff", "show", "branch", "remote",
+                     "rev-parse", "ls-files", "ls-remote"}
+    _GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree",
+                       "--namespace", "--exec-path"}
+    _SEG_SPLIT_RE = re.compile(r";|\|\||\||\n|&&")
+
+    @classmethod
+    def _segment_op(cls, segment: str) -> str:
+        """判定单个命令段的读写意图：只读/中性命令 → read，其余 → write。
+
+        值感知解析：git 的 -C/--git-dir 等选项后一个词元是「值」不是子命令，
+        必须先跳过它再找真子命令（否则 `git -C /path status` 会被判成写意图）。
+        """
+        import shlex
         try:
-            result = subprocess.run(
-                ["find", str(Path.home()), "-name", pattern, "-maxdepth", "4"],
-                capture_output=True, text=True, timeout=10
-            )
-            return result.stdout[:2000] or "[未找到]"
-        except:
-            return "[搜索失败]"
+            toks = shlex.split(segment)
+        except ValueError:
+            toks = segment.split()
+        if not toks:
+            return "read"
+        verb = toks[0].split("/")[-1]
+        if verb in cls._READONLY_CMDS or verb in cls._NEUTRAL_CMDS:
+            return "read"
+        if verb == "git":
+            _skip = False
+            for t in toks[1:]:
+                if _skip:
+                    _skip = False
+                    continue
+                if t.startswith("-"):
+                    _skip = t in cls._GIT_VALUE_OPTS
+                    continue
+                return "read" if t in cls._GIT_READ_SUB else "write"
+        return "write"
+
+    def _search_files(self, pattern: str) -> str:
+        """按文件名搜索。
+
+        DR-20260917-03：搜索范围 = 沙箱可读根（读写白名单 ∪ 只读白名单）。
+        旧实现只搜 ~ 且 maxdepth=4——研究资料库（/mnt/i/hermes/output）里的
+        文件根本搜不到，"帮我找找资料"必然空手。范围与沙箱权限同源：能读的才搜。
+        """
+        import subprocess
+        roots = list(self.sandbox.allowed) + list(self.sandbox.readonly)
+        chunks = []
+        for root in roots:
+            try:
+                if not root.exists():
+                    continue
+                result = subprocess.run(
+                    ["find", str(root), "-maxdepth", "6", "-name", pattern],
+                    capture_output=True, text=True, timeout=10)
+                if result.stdout.strip():
+                    chunks.append(result.stdout.strip())
+            except Exception:
+                continue
+        text = "\n".join(chunks)
+        return text[:2000] if text else "[未找到]"
     
     def _terminal(self, command: str) -> str:
         """执行shell命令。高风险——需要沙箱检查。"""
         import subprocess
         import re
-        
-        # 危险命令清单
-        dangerous = ["rm", "sudo", "dd", "mkfs", "> "]
-        for d in dangerous:
-            if d in command:
-                return f"[拦截] 危险命令: {command}"
-        
-        # 沙箱检查：提取命令中的文件路径并检查
-        # 匹配常见路径模式
+        import shlex
+
+        # DR-20260917-02：危险命令改词元级·命令位判定（防误杀hermes等正常词，
+        # 同时不放过 "grep rm x" 参数位之外任何真命令位上的rm）
+        _bad = self._find_dangerous_cmd(command)
+        if _bad:
+            return f"[拦截] 危险命令: {_bad}"
+
+        # DR-20260917-03：意图改逐段判定（见 _segment_op）。不再用整条命令
+        # 首词一刀切——那是 cd 只读目录/混合读写命令误拒的根。
+        # 重定向目标检查（> >> 写入路径必须过写白名单，防绕道写）
+        for m in re.finditer(r'(?<=[\s;])>>?\s*([^\s;&|]+)', command):
+            if not self.sandbox.check_path(m.group(1), "write"):
+                return f"[沙箱拒绝] 重定向目标越界: {m.group(1)}"
+
+        # 沙箱检查：按「命令段」各自的意图检查段内文件路径
         path_patterns = [
             r'(?<=\s)(/[^\s]+)',  # 绝对路径
             r'(?<=["\'])(/[^\s"\']+)(?=["\'])',  # 引号内的路径
         ]
-        for pattern in path_patterns:
-            paths = re.findall(pattern, command)
-            for p in paths:
-                if not self.sandbox.check_path(p, "write"):
-                    return f"[沙箱拒绝] {self.sandbox.deny_reason(p)}"
-        
+        for _seg in self._SEG_SPLIT_RE.split(command):
+            _op = self._segment_op(_seg)
+            for pattern in path_patterns:
+                for p in re.findall(pattern, _seg):
+                    if not self.sandbox.check_path(p, _op):
+                        return f"[沙箱拒绝] {self.sandbox.deny_reason(p)}"
+
         try:
             result = subprocess.run(command, shell=True, capture_output=True,
                                    text=True, timeout=30)
@@ -248,13 +339,12 @@ class ISN:
             p = Path(path).expanduser().resolve()
             if not self.sandbox.check_path(str(p), "write"):
                 return {"pass": False, "reason": f"沙箱拒绝: {self.sandbox.deny_reason(str(p))}"}
-        # 危险命令检查
+        # 危险命令检查（DR-20260917-02：命令位判定，与_terminal共用_find_dangerous_cmd）
         if tool_name == "terminal":
             command = kwargs.get("command", "")
-            dangerous = ["rm -rf", "sudo", "dd if=", "mkfs", "> /dev"]
-            for d in dangerous:
-                if d in command:
-                    return {"pass": False, "reason": f"危险命令: {d}"}
+            _bad = self._find_dangerous_cmd(command)
+            if _bad:
+                return {"pass": False, "reason": f"危险命令: {_bad}"}
         return {"pass": True, "reason": ""}
 
 

@@ -339,6 +339,24 @@ class _LeftBrain:
                 + "\n".join(_mem_lines) + "\n"
             )
 
+        # DR-20260917-04：本会话对话历史注入（修「每轮冷启动·刚说的话就忘」）。
+        # 源：CLI 逐轮积累 → run_once(history=) → _perceive → ctx.history。
+        # 只取最近 8 条、每条截 400 字——够接住话题，不吃爆上下文。
+        history_ctx = ""
+        _hist = list(getattr(ctx, 'history', None) or [])
+        if _hist:
+            _hist_lines = []
+            for _m in _hist[-8:]:
+                if not isinstance(_m, dict):
+                    continue
+                _role = "用户" if _m.get("role") == "user" else "我(openLLM)"
+                _c = str(_m.get("content", "")).strip()
+                if _c:
+                    _hist_lines.append(f"{_role}：{_c[:400]}")
+            if _hist_lines:
+                history_ctx = ("\n本会话此前的对话（时间顺序，最近的在最后）：\n"
+                               + "\n".join(_hist_lines) + "\n")
+
         # DR-20260828-01 修复#2：工具清单注入（断裂一：模型不知道自己有手）
         tools_ctx = ""
         if ctx.tools:
@@ -382,7 +400,7 @@ class _LeftBrain:
         if _is_identity_q:
             _system_msg += " 注意：你必须以openLLM自称，不要以任何底层模型名称自称。"
 
-        prompt = f"""{identity_ctx}基于以下用户消息，先用自然语言思考和回答。不要输出纯JSON。
+        prompt = f"""{identity_ctx}{history_ctx}基于以下用户消息，先用自然语言思考和回答。不要输出纯JSON。
 {causal_ctx}{memory_ctx}{tools_ctx}
 用户：{ctx.user_message}"""
         resp = self._chat([{"role": "system", "content": _system_msg}, {"role": "user", "content": prompt}])
@@ -421,7 +439,11 @@ class _LeftBrain:
         )
 
     # TOOL_CALLS行提取正则（独立成类属性，测试可直达）
-    _TOOLCALL_RE = re.compile(r'^\s*TOOL_CALLS:\s*(\{.*\})\s*$', re.MULTILINE)
+    # DR-20260917：容忍markdown强调包裹（**TOOL_CALLS: {...}**）——
+    # 2026-09-17品尝实测：本地7B会加粗输出，严格行首匹配接不住→工具不执行、
+    # 原文漏给用户。JSON体仍要求完整一行，宽松仅限首尾的 * 与空白。
+    _TOOLCALL_RE = re.compile(
+        r'^\s*\*{0,2}\s*TOOL_CALLS:\s*(\{.*\})\s*\*{0,2}\s*$', re.MULTILINE)
 
     def _extract_tool_calls(self, text: str) -> list[dict]:
         """从响应中提取TOOL_CALLS JSON行。宽松解析：畸形一律返回[]（回退聊天路径）。"""
@@ -474,7 +496,15 @@ class _RightBrain:
             "你是openLLM的右脑。审查左脑的提案。"
             "你的身份是openLLM，不是底层模型。"
         )
-        prompt = f"""{identity_ctx}你是openLLM的右脑。审查左脑的提案。
+        # DR-20260917-04：对话历史（同左脑——判断提案接不接得住上下文）
+        history_ctx = ""
+        _hist = [m for m in (getattr(ctx, 'history', None) or [])
+                 if isinstance(m, dict) and str(m.get("content", "")).strip()]
+        if _hist:
+            history_ctx = "本会话此前对话：\n" + "\n".join(
+                f"{'用户' if m.get('role') == 'user' else 'openLLM'}："
+                f"{str(m.get('content', ''))[:300]}" for m in _hist[-6:]) + "\n"
+        prompt = f"""{identity_ctx}{history_ctx}你是openLLM的右脑。审查左脑的提案。
 {causal_ctx}原始上下文：{ctx.user_message}
 左脑提案：{proposal.content}
 左脑置信度：{proposal.confidence}

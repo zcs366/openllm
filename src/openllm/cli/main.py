@@ -89,6 +89,10 @@ class AgentShell(cmd.Cmd):
 
     def __init__(self):
         super().__init__()
+        # DR-20260917-04：本会话对话历史（CLI 侧账本，跨轮存活）。
+        # 每轮落一对 (用户输入, 最终回复)：快路径直接拼进 messages，
+        # 心跳路径经 run_once(history=) 注入 prompt。`/clear` 清空。
+        self._history: list[dict] = []
         # 抑制Agent初始化时的审计/警告输出
         import io
         old_stdout, old_stderr = sys.stdout, sys.stderr
@@ -101,6 +105,18 @@ class AgentShell(cmd.Cmd):
         print(f" {C.GREEN}OK{C.RESET}")
         print(f"{C.DIM}  六体就绪 · 研究引擎就绪 · 真模型在线{C.RESET}")
         print()
+
+    def _hist(self) -> list:
+        """会话历史账本（惰性初始化）。
+
+        容错：`AgentShell.__new__` 造的轻量替身（既有行为级钉子用例的惯用手法）
+        不跑 __init__，没有 `_history`——此处懒建，避免 default() 直接 AttributeError。
+        惰性而非类属性：类级可变默认值会被所有实例共享并跨会话累积。
+        """
+        h = getattr(self, "_history", None)
+        if h is None:
+            h = self._history = []
+        return h
 
     def default(self, line: str):
         if not line.strip():
@@ -130,20 +146,64 @@ class AgentShell(cmd.Cmd):
         is_simple = len(line) < 50 and not any(w in line for w in ["搜", "搜索", "写", "读", "执行", "分析"])
         
         if is_simple:
-            # 直接调LLM，不走心跳（但必须注入身份，否则暴露底层模型名）
+            # 直接调LLM，不走心跳（但必须注入身份+工具清单，否则暴露底层模型名、
+            # 且模型不知道自己有工具——DR-20260917-01 品尝师首诊刀①）
             old_out, old_err = sys.stdout, sys.stderr
             sys.stdout = io.StringIO()
             sys.stderr = io.StringIO()
             try:
+                from ..core.isa_impl import FULL_TOOLS, BASE_TOOLS, TOOL_DESCRIPTIONS
                 provider = self.agent.octopus.left.provider
+                # getattr容错：测试注入的假provider可能无_available属性（降级BASE_TOOLS）
+                _provider_ready = bool(getattr(provider, "_available", False))
+                _tools = (list(BASE_TOOLS) + list(FULL_TOOLS[len(BASE_TOOLS):])
+                          if _provider_ready else list(BASE_TOOLS))
+                _tool_lines = "\n".join(
+                    f"- {t}: {TOOL_DESCRIPTIONS.get(t, '参数见文档')}" for t in _tools)
                 _system = (
                     "你是openLLM——一个自主Agent。工具即火，火即工具。"
                     "你必须以openLLM自称，不要以任何底层模型名称（如MiMo、Qwen、GPT）自称。"
+                    "\n\n你可以使用以下工具：\n" + _tool_lines +
+                    "\n如果任务需要读文件、写文件、搜索或执行命令，请在回复的最后一行输出：\n"
+                    'TOOL_CALLS: {"tool_calls": [{"name": "工具名", "args": {"参数": "值"}}]}\n'
+                    "如果只是聊天或回答问题，不要输出TOOL_CALLS行。"
                 )
-                result = provider.chat([
-                    {"role": "system", "content": _system},
-                    {"role": "user", "content": line},
-                ])
+                messages = [{"role": "system", "content": _system}]
+                # DR-20260917-04：带上本会话历史（最近10条）——
+                # 修「刚说的话就忘」：旧实现每轮 message 列表都从零新建，
+                # 短跟进语（"你的看法呢？"）全在快路径，模型看不到前文。
+                messages.extend(self._hist()[-10:])
+                messages.append({"role": "user", "content": line})
+                result = provider.chat(messages)
+
+                # 快路径工具执行回路：模型输出TOOL_CALLS → ISN执行 → 结果回喂再答。
+                # （只注入不执行 = 许诺了手却不给手，模型的自白会原样漏给用户）
+                # getattr容错：测试注入的假agent/isn可能缺方法——缺任一环则跳过回路。
+                from ..iai.octopus import _LeftBrain
+                from ..core.models import Decision
+                _extract = getattr(self.agent.octopus.left, "_extract_tool_calls", None)
+                _isn_exec = getattr(getattr(self.agent, "isn", None), "execute", None)
+                for _round in range(3):  # 最多3轮工具调用，防失控
+                    if _extract is None or _isn_exec is None:
+                        break
+                    calls = _extract(result)
+                    if not calls:
+                        break
+                    if _isn_exec is not None:
+                        tool_result = _isn_exec(
+                            Decision(action="execute", approved=True,
+                                     reason="fast-path", tool_calls=calls))
+                    else:
+                        tool_result = "[工具回路不可用]"
+                    messages.append({"role": "assistant", "content": result})
+                    messages.append({"role": "user", "content":
+                                     f"工具执行结果：\n{tool_result}\n\n"
+                                     "基于以上工具结果继续回答用户。如果还需要工具，"
+                                     "按同样格式输出TOOL_CALLS；否则直接给出最终回答，"
+                                     "不要输出TOOL_CALLS行。"})
+                    result = provider.chat(messages)
+                # 清掉可能残留的TOOL_CALLS行（最后一轮仍在索要工具时）
+                result = _LeftBrain._TOOLCALL_RE.sub("", result or "").strip()
             finally:
                 sys.stdout, sys.stderr = old_out, old_err
         else:
@@ -152,7 +212,7 @@ class AgentShell(cmd.Cmd):
             sys.stdout = io.StringIO()
             sys.stderr = io.StringIO()
             try:
-                result = self.agent.run_once(line)
+                result = self.agent.run_once(line, history=self._hist()[-10:])
             finally:
                 sys.stdout, sys.stderr = old_out, old_err
 
@@ -165,6 +225,12 @@ class AgentShell(cmd.Cmd):
             print(text)
         else:
             print(f"{C.DIM}(无输出){C.RESET}")
+
+        # DR-20260917-04：对话历史落账（快/慢路径通吃）。空回复不入账——
+        # 否则下一轮会把「(无输出)」当成自己的上一句话。
+        if text:
+            self._hist().append({"role": "user", "content": line})
+            self._hist().append({"role": "assistant", "content": text})
 
         print(f"{C.DIM}[{dt:.1f}s]{C.RESET}")
 
@@ -198,16 +264,27 @@ class AgentShell(cmd.Cmd):
                 provider = self.agent.octopus.left.provider
                 prompt = f"基于以下搜索结果回答用户问题。\n\n搜索结果:\n{output}\n\n用户问题: {query}\n\n直接回答，不要说'根据搜索结果'。"
                 t0 = time.time()
+                # DR-20260917-04：搜索路径原来是一次性直调（无 system 身份、无历史），
+                # 两个病一起补：① 缺 system role → 暴露底层模型名（旧陷阱#130）
+                # ② 搜完即忘 → 搜完接一句短问，前文就断了。
+                _msgs = [{"role": "system", "content": (
+                    "你是openLLM——一个自主Agent。"
+                    "你必须以openLLM自称，不要以任何底层模型名称（如MiMo、Qwen、GPT）自称。")}]
+                _msgs.extend(self._hist()[-6:])
+                _msgs.append({"role": "user", "content": prompt})
                 old_out, old_err = sys.stdout, sys.stderr
                 sys.stdout = io.StringIO()
                 sys.stderr = io.StringIO()
                 try:
-                    answer = provider.chat([{"role": "user", "content": prompt}])
+                    answer = provider.chat(_msgs)
                 finally:
                     sys.stdout, sys.stderr = old_out, old_err
                 dt = time.time() - t0
                 if answer:
                     print(f"\n{C.GREEN}{C.BOLD}OpenLLM ▸{C.RESET} {answer}")
+                    # 搜索结果入账，供后续轮次接住
+                    self._hist().append({"role": "user", "content": query})
+                    self._hist().append({"role": "assistant", "content": str(answer)})
                 print(f"{C.DIM}[{dt:.1f}s]{C.RESET}")
             else:
                 print(f"\n{C.DIM}搜索无结果{C.RESET}")
@@ -222,6 +299,12 @@ class AgentShell(cmd.Cmd):
         if cmd in ("exit", "quit", "q"):
             return self.do_exit("")
 
+        elif cmd in ("clear", "reset", "new"):
+            # DR-20260917-04：清空对话历史，起一段全新对话
+            n = len(self._hist())
+            self._hist().clear()
+            print(f"  {C.GREEN}✅{C.RESET} 对话历史已清空（{n}条）——下一轮起是新对话")
+
         elif cmd == "status":
             print(f"\n{C.BOLD}═══ Agent状态 ═══{C.RESET}")
             a = self.agent
@@ -229,6 +312,7 @@ class AgentShell(cmd.Cmd):
             print(f"  研究: {len(a.research.engine.hypotheses)}个假说, "
                   f"{len(a.research.engine.experiments)}个实验")
             print(f"  Session: {len(a.session.turns)}个Turn")
+            print(f"  对话历史: {len(self._hist())}条（/clear 清空）")
 
         elif cmd == "research":
             status = self.agent.research.status()

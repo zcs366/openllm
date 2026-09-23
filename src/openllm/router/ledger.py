@@ -99,22 +99,24 @@ class Ledger:
     def get_stats(self) -> Dict[str, Any]:
         """
         获取账本统计
-        
+
         Returns:
-            包含总次数、各执行器统计、成功率等
+            包含总次数、各执行器统计、成功率、分场景统计（v0.5）
         """
         records = self.read_records()
-        
+
         if not records:
             return {
                 'total': 0,
                 'providers': {},
+                'scenarios': {},
                 'success_rate': 0.0
             }
-        
+
         stats = {
             'total': len(records),
             'providers': {},
+            'scenarios': {},  # v0.5: 按scenario分组统计
             'success_count': 0,
             'fail_count': 0,
             'fallback_count': 0,
@@ -122,39 +124,51 @@ class Ledger:
             'total_completion_tokens': 0,
             'avg_latency_ms': 0
         }
-        
+
         total_latency = 0
-        
+
         for record in records:
             provider = record.get('provider', 'unknown')
             result = record.get('result', 'unknown')
-            
+            scenario = record.get('scenario', 'interactive')  # v0旧记录无scenario字段，归入interactive
+
+            # v0.5: 分场景统计（量/延迟/成功）
+            if scenario not in stats['scenarios']:
+                stats['scenarios'][scenario] = {'count': 0, 'success': 0, 'total_latency': 0}
+            s = stats['scenarios'][scenario]
+            s['count'] += 1
+
             # 统计各执行器
             if provider not in stats['providers']:
                 stats['providers'][provider] = {'count': 0, 'success': 0}
             stats['providers'][provider]['count'] += 1
-            
+
             # 统计结果
             if result == 'ok':
                 stats['success_count'] += 1
                 stats['providers'][provider]['success'] += 1
+                s['success'] += 1
             elif result.startswith('fallback:'):
                 stats['fallback_count'] += 1
             else:
                 stats['fail_count'] += 1
-            
+
             # 统计tokens
             stats['total_prompt_tokens'] += record.get('prompt_tokens', 0)
             stats['total_completion_tokens'] += record.get('completion_tokens', 0)
-            
+
             # 统计延迟
-            total_latency += record.get('latency_ms', 0)
-        
+            latency = record.get('latency_ms', 0)
+            total_latency += latency
+            s['total_latency'] += latency
+
         # 计算平均值
         if stats['total'] > 0:
             stats['success_rate'] = stats['success_count'] / stats['total']
             stats['avg_latency_ms'] = total_latency // stats['total']
-        
+        for s in stats['scenarios'].values():
+            s['avg_latency_ms'] = s['total_latency'] // s['count'] if s['count'] > 0 else 0
+
         return stats
     
     def clear(self):

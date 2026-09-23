@@ -87,6 +87,9 @@ class Agent:
         self._max_ticks = 100  # 安全上限
         self._last_output = ""
         self._persisted = False  # DR-20260829-01 P0-B: 防重复落盘
+        # DR-20260917-04: 本轮对话历史（由 run_once(history=...) 逐轮置入，
+        # _perceive 读走注入 ctx）。空=首轮，行为与修前一致。
+        self._pending_history: list = []
         
         # ── IAX Layer 7 推理预算管理器 ──
         self._budget_manager = InferenceBudgetManager() if _HAS_BUDGET else None
@@ -223,10 +226,16 @@ class Agent:
         if self.mode != "silent":
             print("\n═══ openLLM Agent 关闭 ═══")
     
-    def run_once(self, message: str) -> str:
+    def run_once(self, message: str, history=None) -> str:
         """
         单次运行（用于测试/非交互模式）
-        
+
+        Args:
+            message: 用户输入
+            history: 本会话此前的对话（[{role, content}, ...]），可选。
+                     DR-20260917-04：修「每轮冷启动·刚说的话就忘」。
+                     None/[] = 首轮，prompt 与修前一致。
+
         用法：
             agent = Agent(mode="silent")
             result = agent.run_once("你好")
@@ -235,7 +244,7 @@ class Agent:
         self.isa.mode = "silent"
         try:
             msg = Message(text=message)
-            self._execute_tick(msg)
+            self._execute_tick(msg, history)
             return self._clean_output(self._last_output)
         finally:
             self.isa.mode = saved_mode
@@ -257,10 +266,14 @@ class Agent:
             from openllm.core.isl_chain import ISLChain
             from openllm.isa.causal_memory import get_causal_store
             scars = get_causal_store().get_by_session(self.session.id)
+            # ISL修复P0(20260916): decisions在_persist_session已提取，此处补传
+            # （原管道漏：_persist_session生产但append_epoch未接收，decisions恒空）
+            _isl_decisions = getattr(self, "_last_isl_decisions", None) or []
             ISLChain().append_epoch(
                 session_id=self.session.id,
                 awakening_mode=self.session.state.get("awakening_choice", ""),
                 scars=[m.memory_id for m in scars],
+                decisions=_isl_decisions,
             )
         except Exception:
             import logging
@@ -290,6 +303,8 @@ class Agent:
                 _lm = getattr(self, '_last_message', None)
                 if _lm and hasattr(_lm, 'text'):
                     decisions.append({"summary": _lm.text[:80]})
+            # ISL修复P0(20260916): 暂存提取结果供shutdown补传ISL append_epoch
+            self._last_isl_decisions = decisions
             insights = []
             if self._last_output:
                 insights.append(self._last_output[:200])
@@ -450,9 +465,11 @@ class Agent:
         except Exception:
             pass  # 固化触发失败不阻塞主循环
 
-    def _execute_tick(self, msg: Message):
+    def _execute_tick(self, msg: Message, history=None):
         """一次完整的10阶段心跳（委托给agent_heartbeat）"""
         self._last_message = msg  # DR-20260829-01R: 记录末次输入供shutdown持久化
+        # DR-20260917-04: 逐轮置入对话历史，_perceive 读取注入 ctx
+        self._pending_history = list(history or [])
         from openllm.iax.agent_heartbeat import execute_tick
         execute_tick(self, msg)
 
