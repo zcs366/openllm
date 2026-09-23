@@ -50,7 +50,9 @@ class RouteResult:
 
 INTENT_PATTERNS = [
     {
-        "name": "hermes_search",
+        # 2026-09-23 ①修复：曾写 hermes_search（Hermes侧名字，openLLM注册表里没有）
+        # ——路由到幻影工具，"未知工具"错误反复喂回模型，7B被劫持烧穿预算
+        "name": "search",
         "patterns": [
             r"(?:搜索|搜一下|查一下|查找|检索|search|look up)\s*(.+?)(?:\s*[。！\.]|$)",
             r"(?:帮我|请|能不能)\s*(?:搜索|搜|查)\s*(.+)",
@@ -125,13 +127,25 @@ class ToolRouter:
             return result
         
         tool_call = self._regex_match(model_output)
-        
+
         if not tool_call:
             tool_call = self._heuristic_match(model_output)
-        
+
         if not tool_call:
             return result
-        
+
+        # 2026-09-23 ①修复（路由抢劫案）：路由结果必须在册，不在册不路由。
+        #   病灶：启发式层见"搜/查/找"就路由到未注册的幻影工具，"未知工具"错误
+        #   反复喂回模型——模型正在走 tool_load 三步法时（回复里必然提到"搜"），
+        #   被劫持烧穿5轮预算，最终误判"tool_load自己也坏了"。
+        #   另外：模型输出含 tool_load(/tool_unload( 时是在做工具自管理，
+        #   启发式层（单关键词劫持）不适用，直接放弃路由。
+        if "tool_load(" in model_output or "tool_unload(" in model_output:
+            return result
+        registered = getattr(self.engine.tools, "_tools", {}) if self.engine else {}
+        if registered and tool_call.name not in registered:
+            return result
+
         result.tool_call = tool_call
         result.routed = True
         
@@ -166,8 +180,9 @@ class ToolRouter:
                 query = query.replace(kw, "")
             query = query.strip()
             if query and len(query) > 2:
+                # 2026-09-23 ①修复：hermes_search→search（注册表真名）
                 return ToolCall(
-                    name="hermes_search",
+                    name="search",
                     params={"query": query[:80], "max_results": 5},
                     confidence=0.7,
                     source="heuristic",

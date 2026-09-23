@@ -98,8 +98,16 @@ def build_system_prompt(tools_list: list, identity: str, mem_ctx: dict) -> str:
         parts.append("调用方式：在```python代码块中调用工具函数，系统会自动执行。\n")
         for t in tools_list:
             parts.append(f"- {t['name']}: {t['description']}")
-        parts.append("\n示例：用户说'读取某文件'→ 用read_file(\"路径\")；用户说'运行命令'→ 用terminal(\"命令\")；用户说'搜索XX'→ 用hermes_search(\"关键词\")")
-        parts.append("\n**重要：遇到事实性问题（论文、技术、数据）必须先用hermes_search搜索，不要凭记忆回答。**")
+        parts.append("\n示例：用户说'读取某文件'→ 用read_file(\"路径\")；用户说'运行命令'→ 用shell(\"命令\")；用户说'搜索文件内容'→ 用search(\"关键词\")")
+        parts.append("\n**重要：遇到事实性问题（论文、技术、数据）必须先用工具搜索，不要凭记忆回答。**")
+        # tool_load 三步法（2026-09-23 ①修复：7B元认知病灶——示例行曾引用不在册的
+        #   hermes_search/terminal 教唆幻觉；且元工具零引导致7B三跑全败。补显式引导再测）
+        parts.append(
+            "\n### 工具不够用时：tool_load 三步法\n"
+            "1. 发现：tool_load(query=\"网页抓取\") —— 语义搜索返回候选清单\n"
+            "2. 装载：tool_load(name=\"fcrawl\") —— 用候选里的精确名字装载，装载后即可当普通工具调用\n"
+            "3. 归还：用完 tool_unload(name=\"fcrawl\") 回收\n"
+            "铁律：只调用上面清单里列出的工具；清单里没有的能力，先走三步法，绝不凭记忆编工具名。")
     if mem_ctx.get("status") != "empty":
         decisions = mem_ctx.get("decisions", [])
         if decisions:
