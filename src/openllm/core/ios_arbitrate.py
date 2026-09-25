@@ -53,15 +53,17 @@ def arbitrate(ios, proposal: Proposal, critique: Critique,
         )
 
     # Level 2: self_consistency — M1版本·基于置信度的一致性检查
-    # 原理：真正的self_consistency需要LLM多次采样+投票（参考hemispheres_enhanced），
-    # M1用proposal.confidence作为一致性代理指标。
-    # 当confidence >= 0.6 时视为通过一致性检查；< 0.6 降级到L1并记录。
+    # ⚠️ 0926审计诚实化: proposal.confidence 是硬编码计数启发式(如 min(0.9, 0.5+n*0.1)、
+    # 1.0-0.2*告警数), 只有 {0.48,0.6,0.9} 三个取值, 不是校准概率。本分支两态均执行
+    # (approved=True), 实际不拦截任何提案——"一致性检查"名不副实, 仅作降级留痕。
+    # 71题真值考卷(D1)证实: 危险提案以conf=0.9全量通过本闸。证据: 河床0925JEV系统一模型/04。
+    # 真self_consistency需LLM多次采样+投票(参考hemispheres_enhanced), 或换校准传感器(L2自训线)。
     if level == 2:
         if proposal.confidence >= 0.6:
             return Decision(
                 action="execute",
                 approved=True,
-                reason=(f"Level 2: self_consistency通过"
+                reason=(f"Level 2: self_consistency通过[注:conf为计数启发式非校准概率]"
                         f"（confidence={proposal.confidence:.2f} >= 0.6）"),
                 risk_ref=risk,
                 tool_calls=getattr(proposal, 'tool_calls', []) or [],
@@ -71,7 +73,7 @@ def arbitrate(ios, proposal: Proposal, critique: Critique,
             return Decision(
                 action="execute",
                 approved=True,
-                reason=(f"Level 2: self_consistency未通过"
+                reason=(f"Level 2: self_consistency未通过[注:conf为计数启发式非校准概率]"
                         f"（confidence={proposal.confidence:.2f} < 0.6），"
                         f"降级L1单左脑"),
                 risk_ref=risk,
