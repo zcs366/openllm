@@ -214,6 +214,24 @@ class OpenLLMEngine:
         # P0: 启动安全审计（不阻塞）
         self._startup_audit()
 
+        # G1-0927: Landlock 内核级写锁（opt-in，OPENLLM_LANDLOCK=1 显式开启）。
+        # restrict_self 不可逆且进程全域——默认关，避免破坏测试与合法工作流。
+        self._apply_kernel_write_lock()
+
+    def _apply_kernel_write_lock(self) -> None:
+        """Landlock 内核写锁 opt-in 上身（G1-0927）。失败只告警不阻塞启动。"""
+        if os.environ.get("OPENLLM_LANDLOCK") != "1":
+            return
+        try:
+            from openllm.security.landlock import KernelWriteLock
+            result = KernelWriteLock.default().apply_and_verify()
+            if result.ok:
+                logger.info("Landlock 内核写锁上身: %s", result.detail)
+            else:
+                logger.warning("Landlock 内核写锁未生效: %s", result.detail)
+        except Exception as exc:  # noqa: BLE001 — 安全增强不得阻断启动
+            logger.warning("Landlock 内核写锁异常（保持 Python 层检查）: %s", exc)
+
     def _register_blood_vessels(self):
         """注册5个血管handler到消息总线。"""
         # 血管#2: IOS→ISA（verify结果→信念更新）

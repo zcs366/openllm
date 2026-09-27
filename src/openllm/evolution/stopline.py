@@ -160,8 +160,8 @@ def evaluate_from_bus(
     **kwargs: Any,
 ) -> StoplineDecision:
     """从真实总线读 train.completed 事件并判定。"""
-    import sys as _sys
-    _sys.path.insert(0, "/home/zcs/projects/openllm/src")
+    # 20260927 G2归档：projects/openllm 检出已 tag archive/pre-merge-0926，
+    # 路径改走主仓自身（evolution/bus.py 两仓同源，diff 为零）。
     from openllm.evolution.bus import EvolutionBus
 
     bus = EvolutionBus(store_dir=store_dir)

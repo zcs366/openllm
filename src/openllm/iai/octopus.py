@@ -360,12 +360,7 @@ class _LeftBrain:
         # DR-20260828-01 修复#2：工具清单注入（断裂一：模型不知道自己有手）
         tools_ctx = ""
         if ctx.tools:
-            _tool_desc = {
-                "read_file": "读取文件内容(path)",
-                "write_file": "写入文件(path, content)",
-                "search_files": "按文件名模式搜索(pattern)",
-                "terminal": "执行shell命令(command)",
-            }
+            from openllm.core.isa_impl import TOOL_DESCRIPTIONS as _tool_desc
             _tool_lines = [f"- {t}: {_tool_desc.get(t, '参数见文档')}" for t in ctx.tools]
             tools_ctx = ("\n你可以使用以下工具：\n" + "\n".join(_tool_lines) + "\n"
                          "如果任务需要读文件、写文件、搜索或执行命令，请在回复的最后一行输出：\n"

@@ -23,6 +23,15 @@ class ISN:
             "search_files": self._search_files,
             "terminal": self._terminal,
         }
+        # ── 网络工具（net.py）──
+        _net_ok = False
+        try:
+            from ..net import web_search as _ws, web_fetch as _wf
+            self.tools["web_search"] = self._web_search
+            self.tools["web_fetch"] = self._web_fetch
+            _net_ok = True
+        except Exception:
+            pass  # net 不可用 → 降级不注册
         # [进化] 接入ToolRegistry的verify-before-complete机制
         try:
             from ..tools.executor import ToolRegistry, ToolResult
@@ -37,7 +46,7 @@ class ISN:
         except Exception:
             self._tool_registry = None
             self._has_verify = False
-        print(f"  ISN 工具执行就绪 · {len(self.tools)}个工具 · 沙箱={len(self.sandbox.allowed)}个允许路径 · 外部工具={len(self.bridge.discovered)}个 · verify={'ON' if self._has_verify else 'OFF'}")
+        print(f"  ISN 工具执行就绪 · {len(self.tools)}个工具 · 沙箱={len(self.sandbox.allowed)}个允许路径 · 外部工具={len(self.bridge.discovered)}个 · verify={'ON' if self._has_verify else 'OFF'} · 网络={'ON' if _net_ok else 'OFF'}")
         # 加载已学习技能(血管#3: ios→isn)
         self.learned_skills: list[dict] = []
         self._load_learned_skills()
@@ -155,21 +164,23 @@ class ISN:
     
     def _read_file(self, path: str) -> str:
         """读取文件内容(沙箱检查·先解析再检查防路径穿越)"""
-        # 先解析路径(防../../etc/passwd穿越)
-        p = Path(path).expanduser().resolve()
+        # 先解析路径(防../../etc/passwd穿越)；盘符路径 I:\ 规范化为 /mnt/i/
+        p = self.sandbox._normalize_path(path)
         # 再检查沙箱
         if not self.sandbox.check_path(str(p), "read"):
             return f"[沙箱拒绝] {self.sandbox.deny_reason(str(p))}"
         if not p.exists():
             return f"[错误] 文件不存在: {path}"
+        if p.is_dir():
+            return f"[错误] 是目录不是文件: {path}（列目录请用 terminal 的 ls）"
         if p.stat().st_size > 100000:
             return f"[错误] 文件过大: {path}"
         return p.read_text(encoding="utf-8", errors="replace")[:5000]
     
     def _write_file(self, path: str, content: str) -> str:
         """写入文件(沙箱检查·先解析再检查防路径穿越)"""
-        # 先解析路径(防穿越)
-        p = Path(path).expanduser().resolve()
+        # 先解析路径(防穿越)；盘符路径规范化，与check_path同源
+        p = self.sandbox._normalize_path(path)
         # 再检查沙箱
         if not self.sandbox.check_path(str(p), "write"):
             return f"[沙箱拒绝] {self.sandbox.deny_reason(str(p))}"
@@ -258,6 +269,9 @@ class ISN:
         import subprocess
         roots = list(self.sandbox.allowed) + list(self.sandbox.readonly)
         chunks = []
+        # 已知局限（2026-09-24 放权后实测）：白名单含 589G 的 /mnt/h——全盘 find
+        # 在 10s timeout 内跑不完，大根静默跳过（显式路径 read_file 不受影响，
+        # 只有"盲搜全盘"受限）。待搜索走增量索引（ISA 章鱼索引）后此路退役。
         for root in roots:
             try:
                 if not root.exists():
@@ -271,6 +285,17 @@ class ISN:
                 continue
         text = "\n".join(chunks)
         return text[:2000] if text else "[未找到]"
+
+    # ── 网络工具薄包装（转调 net.py）──
+    def _web_search(self, query: str = "", max_results: int = 5) -> str:
+        """搜索引擎查资料。签名容错：支持 query=kwargs 或单参两条路。"""
+        from ..net import web_search
+        return web_search(query, max_results)
+
+    def _web_fetch(self, url: str = "") -> str:
+        """抓取网页正文。签名容错：支持 url=kwargs 或单参两条路。"""
+        from ..net import web_fetch
+        return web_fetch(url)
     
     def _terminal(self, command: str) -> str:
         """执行shell命令。高风险——需要沙箱检查。"""
@@ -314,7 +339,7 @@ class ISN:
     
     def _write_file_real(self, path: str, content: str) -> str:
         """真实写入——ToolRegistry调用此方法"""
-        p = Path(path).expanduser().resolve()
+        p = self.sandbox._normalize_path(path)
         if not self.sandbox.check_path(str(p), "write"):
             return f"[沙箱拒绝] {self.sandbox.deny_reason(str(p))}"
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -336,7 +361,7 @@ class ISN:
         # 沙箱检查
         if tool_name == "write_file":
             path = kwargs.get("path", "")
-            p = Path(path).expanduser().resolve()
+            p = self.sandbox._normalize_path(path)
             if not self.sandbox.check_path(str(p), "write"):
                 return {"pass": False, "reason": f"沙箱拒绝: {self.sandbox.deny_reason(str(p))}"}
         # 危险命令检查（DR-20260917-02：命令位判定，与_terminal共用_find_dangerous_cmd）

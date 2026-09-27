@@ -11,7 +11,8 @@ from .models import *
 # 保证无论走哪条路，模型都"知道自己有手"。
 # 注意顺序与 FULL_TOOLS 切片逻辑耦合：FULL_TOOLS 后两项是需要provider可用的增强工具。
 BASE_TOOLS = ["read_file", "search_files"]
-FULL_TOOLS = ["read_file", "search_files", "write_file", "terminal"]
+FULL_TOOLS = ["read_file", "search_files", "write_file", "terminal",
+              "web_search", "web_fetch"]
 
 # 工具一句话描述（注入prompt用，与octopus.py tools_ctx同源）
 TOOL_DESCRIPTIONS = {
@@ -19,6 +20,8 @@ TOOL_DESCRIPTIONS = {
     "write_file": "写入文件(path, content)",
     "search_files": "按文件名模式搜索(pattern)",
     "terminal": "执行shell命令(command)",
+    "web_search": "搜索引擎查资料(query, max_results)",
+    "web_fetch": "抓取网页正文(url)",
 }
 
 class ISA:

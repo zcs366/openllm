@@ -42,7 +42,38 @@ class Sandbox:
         # DR-20260917-02：三元具神智能研究资料库（openLLM自己的成长档案）。
         # 只开放output子树（研究产出物），hermes其余目录（配置/记忆）不放行。
         "/mnt/i/hermes/output/",
+        # 2026-09-24 放权：ISA 项目本体（章鱼搜索引擎/ILM管线/jiak 等）是
+        # openLLM 的器官级依赖——main_loop 直接引用 projects/isa/octopus/scripts，
+        # 却不给读权，Agent 读 bedrock_ingest.py 被拦=让器官隔墙猜自己的血管。
+        # 只读；写仍锁死在 DEFAULT_ALLOWED。
+        "/home/zcs/projects/isa/",
+        # 2026-09-24 放权（成市令）：openLLM 的知识资产四库。plur=engram原始库
+        # （129K，isa.py 硬编码路径）；projects/openllm=分叉检出（850M 含.venv，
+        # main_loop 的 _REFLECT_SCRIPT/固化caps 落它，需码址一致后收敛）；
+        # wiki+hermes-ita=研究腹地。均只读；写仍锁死 DEFAULT_ALLOWED。
+        "/home/zcs/.plur/",
+        "/home/zcs/projects/openllm/",
+        "/home/zcs/projects/wiki/",
+        "/home/zcs/projects/hermes-ita/",
+        # 2026-09-24 成市亲令放权：H盘全部资料、C盘 pi 配置、codex 配置、root 的
+        # openllm。实况核验后：/mnt/h ✓、/mnt/c/Users/Administrator/.pi ✓ 入列；
+        # .codex 不存在（跳过）；/root/.openllm 对 zcs 用户 Permission denied，
+        # 入列也读不了（跳过，需 root 侧另议）。密钥类文件由下方 deny 名单兜底。
+        "/mnt/h/",
+        "/mnt/c/Users/Administrator/.pi/",
+        # 2026-09-26 成市令：整个I盘放权（只读）。openLLM的家、研究档案、
+        # 实验数据、图结构全在I盘，逐子树放权跟不上铺开速度。写仍锁死
+        # DEFAULT_ALLOWED；上方密钥黑名单（SENSITIVE_READ_DENY）兜底不变。
+        "/mnt/i/",
     ]
+
+    # 敏感文件读取黑名单（2026-09-24）：白名单放目录，黑名单钉密钥。
+    # .pi 整目录放读是为让 Agent 看 harness 配置，但 auth.json（pi 的模型
+    # API key 库）念出去=把钥匙递给外部网关。任何白名单命中前先过这关。
+    SENSITIVE_READ_DENY = (
+        "auth.json", ".env", "id_rsa", "id_ed25519",
+        "/secrets/", "/vault/", "credentials",
+    )
 
     
     def __init__(self, allowed_paths: Optional[list[str]] = None,
@@ -82,6 +113,18 @@ class Sandbox:
         except Exception:
             pass
     
+    # ── 2026-09-24 Windows盘符路径规范化 ──
+    # 本地模型在 Windows 语境下天然输出 "I:\hermes\output\…"。旧行为：Path()
+    # 把 "I:" 当相对目录名拼进 CWD（恰在只读白名单 /mnt/i/openllm 内），
+    # check 返回 True 而实际文件不存在 → 报错语义混乱；"C:/Users/…" 同样误判放行。
+    # 修法：先规范化 X: → /mnt/x（两盘全映射，写权限仍由各白名单裁决），再解析。
+    @staticmethod
+    def _normalize_path(path: str) -> Path:
+        p = str(path).strip().replace("\\", "/")
+        if len(p) >= 2 and p[1] == ":" and p[0].isalpha():
+            p = "/mnt/" + p[0].lower() + (p[2:] if p[2:].startswith("/") else "/" + p[2:])
+        return Path(p).expanduser().resolve()
+
     def check_path(self, path: str, operation: str = "read") -> bool:
         """
         检查路径是否在允许范围内。
@@ -93,7 +136,11 @@ class Sandbox:
         Returns:
             是否允许
         """
-        target = Path(path).expanduser().resolve()
+        target = self._normalize_path(path)
+
+        # 敏感文件黑名单：先于白名单判定（密钥在任何目录下都不放行）
+        if any(tok in str(target) for tok in self.SENSITIVE_READ_DENY):
+            return False
 
         # 写/执行：只认读写白名单（只读目录不参与）
         if operation in ("write", "execute"):
@@ -151,7 +198,10 @@ class Sandbox:
         Returns:
             拒绝原因描述
         """
-        target = Path(path).expanduser().resolve()
+        target = self._normalize_path(path)
+        if any(tok in str(target) for tok in self.SENSITIVE_READ_DENY):
+            return ("敏感文件（密钥/凭据类）永不放行——"
+                    "这不是范围问题，换路径/换姿势都没有用。")
         allowed_strs = [str(a) for a in self.allowed]
         ro_strs = [str(a) for a in self.readonly]
         return (f"路径 {target} 不在允许范围内。"

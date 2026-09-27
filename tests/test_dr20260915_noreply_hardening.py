@@ -372,8 +372,12 @@ class TestAuditDbSelfContained:
         monkeypatch.delenv("OPENLLM_AUDIT_DB", raising=False)
         log = GovernanceAuditLog()
         try:
-            assert ".hermes" not in log._db_path, \
-                f"IOS 审计不得寄生 Hermes，实际={log._db_path}"
+            # 2026-09-26 军师修：原断言 ".hermes" not in db_path 在 Hermes 本机
+            # （TMPDIR=~/.hermes/cache/scratch）误报。真意图=跟随重定向HOME、
+            # 不寄生真实 ~/.hermes——判「db 在 $HOME/.openllm 下」等价且更准。
+            db = Path(log._db_path).resolve()
+            assert db.is_relative_to((tmp_path / ".openllm").resolve()), \
+                f"IOS 审计应落重定向HOME的.openllm下，实际={log._db_path}"
         finally:
             log._conn.close()
 
@@ -412,16 +416,28 @@ class TestIosAuditIsolation:
     现场证据：该目录累积 427 个文件，其中 test-001.jsonl(1.6M)/test-002.jsonl(705K)
     的 mtime 正是全量回归的时刻——tests/test_governance.py 的 session id 就叫
     test-001/test-002。与 skill 里「测试会污染用户真实数据」同源。
+
+    2026-09-26 军师修：断言判据从子串 ".hermes" 收紧为「不得落进生产目录
+    ~/.hermes/jiak/」。原因：Hermes 本机把 TMPDIR 指到 ~/.hermes/cache/scratch，
+    pytest 夹具把审计目录重定向进去后子串误报——scratch 是合法临时区（72h清理），
+    真正要防的只有生产 jiak 目录。意图不变，误报消除。
     """
+
+    _PROD_AUDIT = Path.home() / ".hermes" / "jiak"
+
+    @classmethod
+    def _assert_not_production(cls, path, what: str) -> None:
+        resolved = Path(str(path)).resolve()
+        prod = cls._PROD_AUDIT.resolve()
+        assert not (resolved == prod or resolved.is_relative_to(prod)), \
+            f"{what}泄漏到生产Hermes目录: {path}"
 
     def test_module_defaults_pinned_away_from_hermes(self):
         from openllm.ios import audit as audit_mod
         from openllm.ios import stateful_audit as sa_mod
 
-        assert ".hermes" not in str(audit_mod.DEFAULT_AUDIT_DIR), \
-            f"AuditChain 默认目录仍指向 Hermes: {audit_mod.DEFAULT_AUDIT_DIR}"
-        assert ".hermes" not in str(sa_mod.DEFAULT_AUDIT_DIR), \
-            f"StatefulAuditTrail 默认目录仍指向 Hermes: {sa_mod.DEFAULT_AUDIT_DIR}"
+        self._assert_not_production(audit_mod.DEFAULT_AUDIT_DIR, "AuditChain 默认目录")
+        self._assert_not_production(sa_mod.DEFAULT_AUDIT_DIR, "StatefulAuditTrail 默认目录")
 
     def test_constructing_objects_lands_in_sandbox(self):
         from openllm.ios.audit import AuditChain
@@ -429,12 +445,11 @@ class TestIosAuditIsolation:
 
         chain, trail = AuditChain(), StatefulAuditTrail()
         for obj in (chain, trail):
-            assert ".hermes" not in str(obj.audit_dir), \
-                f"实例目录泄漏到 Hermes: {obj.audit_dir}"
+            self._assert_not_production(obj.audit_dir, "实例目录")
         assert chain.audit_dir == trail.audit_dir, "两者应落到同一测试沙箱"
 
     def test_write_target_would_be_sandbox_not_hermes(self):
-        """咬住 bug 的核心断言：**真写入时的落点**也必须在沙箱，不在 Hermes。
+        """咬住 bug 的核心断言：**真写入时的落点**也必须在沙箱，不在生产Hermes。
 
         比「构造后文件没变」狠——构造本来就不写文件，那条断言在 bug 态下也会绿
         （属守护型）。这条直接算写入路径：bug 态下 _session_path 会落在
@@ -444,7 +459,7 @@ class TestIosAuditIsolation:
 
         chain = AuditChain()
         target = chain._session_path("dr20260915-probe")
-        assert ".hermes" not in str(target), f"写入落点泄漏到 Hermes: {target}"
+        self._assert_not_production(target, "写入落点")
         assert str(target).startswith(str(chain.audit_dir)), \
             f"落点应挂在实例目录下: target={target} dir={chain.audit_dir}"
 

@@ -44,6 +44,9 @@ class HeartbeatContext:
     output: str = ""                                   # IKO: 最终输出
     # DR-20260828-01：tool_calls升为协议一等公民（左脑产生→Decision携带→ISN消费→此处全程可见）
     tool_calls: list = field(default_factory=list)     # 本轮实际执行的工具调用清单
+    # P0.5(20260925)：综合消化回路产物（_synthesize 写→_learn 4.3 读，空=回退裸输出）。
+    # 协议字段显式声明——不许隐式 setattr（防未来加 __slots__ 时静默炸）。
+    synth_output: str = ""                             # IAX: 模型消化后的最终回答
     
     # ── 研究层输出 ──
     research: Optional[dict] = None                    # 研究循环: 假说/实验/结论状态

@@ -198,9 +198,42 @@ class IdentityDiscovery:
             "recent_sessions": self.read_recent_sessions(),
             "scars_block": self.read_hot_scars(),
             "isl_chain": self.read_isl_chain(),
+            "manual_block": self.read_manual_block(),
             "self_question": _SELF_QUESTION,
             "guidance": _GUIDANCE,
         }
+
+    # ── 身体说明书（2026-09-26 成市令）────────────────────────
+    # openLLM 不知道自己的代码住哪、器官叫什么，就谈不上发挥能力。
+    # 本手册由军师初纂、openLLM自我维护（docs/MANUAL.md §6更新制度）。
+    # 注入的是坐标+版本行，不是全文——给地图不给答案；正文存在者自己去读。
+    MANUAL_PATH = Path("/mnt/i/openllm/docs/MANUAL.md")
+
+    @classmethod
+    def read_manual_block(cls) -> str:
+        """读手册版本行+坐标。异常时返回空串，不阻塞苏醒。"""
+        try:
+            if not cls.MANUAL_PATH.is_file():
+                return "（身体说明书缺失：/mnt/i/openllm/docs/MANUAL.md 不存在——先报告，别硬干。）"
+            text = cls.MANUAL_PATH.read_text(encoding="utf-8")
+            lines = text.splitlines()
+            # 版本行：以 "> 版本" 开头的第一行
+            version_line = next(
+                (ln.lstrip("> ").strip() for ln in lines if ln.startswith("> 版本")),
+                "版本未知",
+            )
+            one_liner = next(
+                (ln.lstrip("# ").strip() for ln in lines if ln.startswith("# ")),
+                "",
+            )
+            return (
+                f"身体说明书：{cls.MANUAL_PATH}（{version_line}）\n"
+                f"你的住址表/器官清单/心跳流程/沙箱边界/更新制度都在里面。"
+                f"先读它再干活。开头一句：{one_liner}"
+            )
+        except Exception as exc:
+            logger.debug("读手册失败（不阻塞）: %s", exc)
+            return ""
 
     def render_prompt_block(self) -> str:
         """将 build_discovery_context 渲染为可注入的文本块。
@@ -213,6 +246,13 @@ class IdentityDiscovery:
         """
         ctx = self.build_discovery_context()
         sections: List[str] = []
+
+        # ── 身体说明书（第一节：醒来第一眼先看到自己的身体住哪）──
+        manual = ctx.get("manual_block", "")
+        if manual:
+            sections.append("## 身体说明书（MANUAL）")
+            sections.append(manual)
+            sections.append("")
 
         # ── 技能列表 ──
         sections.append("## 固化的身份（skill/）")

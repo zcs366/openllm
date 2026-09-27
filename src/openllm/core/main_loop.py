@@ -362,32 +362,30 @@ class Agent:
         return 100000
 
     def _clean_output(self, raw: str) -> str:
-        """从Agent raw output中提取干净回复。过滤内部系统噪声。"""
+        """从Agent raw output中过滤内部系统注入行，保留全部正文。
+
+        旧版（反向扫描截断保尾段）会误切含 --- / 来源: 等的正常 markdown
+        正文（实测丢 65%~87%，2026-09-15 医师已记）。改为逐行过滤：
+        仅剔除行首匹配系统注入标记的行（方括号前缀家族），
+        其余正文全保。若全部被剔光则返回原始文本。
+        """
         if not raw:
             return ""
         lines = raw.split("\n")
-        # 内部系统标记
-        noise = ["[L1]", "[L2]", "[L3]", "[L4]", "[L5]", "[isa_ice]", "摘要:",
-                 "🔴", "🗜️", "[jiak", "🔍", "□ ", "━━", "──", "│ ", "╔", "╚",
-                 "关键决策", "关键句", "最近洞察", "[章鱼", "[PLUR", "[openllm",
-                 "[jika", "[ambient", "---", "强制读取", "未读不可跳过", "语义场",
-                 "铁律", "[上下文压缩", "线索:", "来源:", "写入方式", "意识笔记",
-                 "写入", "同时追加", "第一人称", "不要总结", "🐙", "[文档]",
-                 "[isa_ice]", "[记忆]", "[openllm-", "[octopus-", "[jiak-",
-                 "token:", "[UNTRUSTED]", "搜索词", "搜索经验", "有新洞察"]
-        # 从末尾往前找最后一段"干净"文本
-        last_clean = len(lines) - 1
-        for i in range(len(lines) - 1, -1, -1):
-            s = lines[i].strip()
-            if not s:
+        # 系统注入标记形态：行首 ^\s*\[xxx...\] 形式的方括号前缀家族。
+        # 裸中文词、符号行、markdown 分隔线均不在此列——它们会出现在正文里。
+        import re
+        _SYS_MARKERS = re.compile(
+            r"^\s*\[(?:L[1-5]|isa_ice|jiak|章鱼|PLUR|openllm|jika|ambient"
+            r"|上下文压缩|记忆|文档|UNTRUSTED|搜索|网络|openllm-|octopus-|jiak-"
+            r"|isa_ice)\b"
+        )
+        cleaned = []
+        for line in lines:
+            if _SYS_MARKERS.match(line):
                 continue
-            if any(n in s for n in noise):
-                break
-            last_clean = i
-        # 取last_clean到末尾
-        result = "\n".join(lines[last_clean:]).strip()
-        # 去掉空行
-        result = "\n".join(l for l in result.split("\n") if l.strip()).strip()
+            cleaned.append(line)
+        result = "\n".join(cleaned).strip()
         return result if result else raw.strip()
 
     def _tick(self):

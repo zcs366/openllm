@@ -134,6 +134,7 @@ class PermissionGate:
         # L3 网络
         "api_call": PermissionLevel.NETWORK,
         "web_search": PermissionLevel.NETWORK,
+        "web_fetch": PermissionLevel.NETWORK,
         "hermes_search": PermissionLevel.NETWORK,
         # L3 网络工具（自造降级链 2026-09-10 鲁班补）
         "fcrawl": PermissionLevel.NETWORK,

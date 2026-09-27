@@ -1,9 +1,11 @@
 """extracted from main_loop.py"""
-import json, os, time, uuid
+import json, logging, os, time, uuid
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Optional
 from .models import *
+
+logger = logging.getLogger("openllm.provider")
 
 class LLMProvider:
     """最简单的LLM调用封装（支持多provider）"""
@@ -48,67 +50,132 @@ class LLMProvider:
                 pass
         return {}
     
+    # ── 重试策略（2026-09-25 弹性刀）──
+    # 瞬时网络抖动不该整轮报废。对 SSLError/ConnectionError/Timeout/
+    # ChunkedEncodingError 最多重试 2 次（总 3 次），退避 1s/2s。
+    # HTTP 429（限流）可重试 1 次，退避 5s。其他 HTTP 业务错误不重试。
+    # 开关：OPENLLM_PROVIDER_RETRY=0/off 时退化为纯透传（1 次，旧行为）。
+    _RETRY_ENV_KEY = "OPENLLM_PROVIDER_RETRY"
+    _MAX_EXTRA_RETRIES = 2          # 额外尝试次数（总 = 1 + 2 = 3）
+    _MAX_EXTRA_RETRIES_429 = 1      # 429 额外尝试次数（总 = 2）
+    _RETRY_DELAYS = [1.0, 2.0]     # 指数退避秒数
+    _RETRY_DELAY_429 = 5.0          # 429 退避秒数
+
+    @staticmethod
+    def _is_retryable(e: Exception) -> bool:
+        """判断异常是否为可重试的瞬时网络类。"""
+        import requests.exceptions as req_exc
+        return isinstance(e, (
+            req_exc.SSLError,
+            req_exc.ConnectionError,
+            req_exc.Timeout,
+            req_exc.ChunkedEncodingError,
+        ))
+
+    @staticmethod
+    def _is_rate_limited(e: Exception) -> bool:
+        """HTTP 429 限流。"""
+        import requests.exceptions as req_exc
+        return isinstance(e, req_exc.HTTPError) and getattr(getattr(e, 'response', None), 'status_code', 0) == 429
+
+    @staticmethod
+    def _human_error(e: Exception) -> str:
+        """技术异常 → 人话。"""
+        import requests.exceptions as req_exc
+        if isinstance(e, (req_exc.SSLError, req_exc.ConnectionError)):
+            return "网络没连通，稍后再试"
+        if isinstance(e, req_exc.Timeout):
+            return "响应超时"
+        if isinstance(e, req_exc.HTTPError) and getattr(getattr(e, 'response', None), 'status_code', 0) == 429:
+            return "免费层限流，请过几分钟再试"
+        return "调用失败"
+
+    def _max_extra_retries(self, is_429: bool = False) -> int:
+        """开关 OFF → 0 额外（纯透传）；ON → 默认 2，429 特殊 1。"""
+        env_val = os.environ.get(self._RETRY_ENV_KEY, "").lower().strip()
+        if env_val in ("0", "off", "false", "no"):
+            return 0
+        return self._MAX_EXTRA_RETRIES_429 if is_429 else self._MAX_EXTRA_RETRIES
+
     def chat(self, messages: list[dict]) -> str:
         """调LLM·返回文本。"""
         if not self._available:
             user_msg = messages[-1]["content"] if messages else ""
             self._last_usage = {}
             return f"[模拟LLM] 已收到: {user_msg[:50]}"
-        
-        try:
-            import requests
-            headers = {"Content-Type": "application/json"}
-            if self.api_key and self.api_key != "lm-studio":
-                headers["Authorization"] = f"Bearer {self.api_key}"
-            
-            resp = requests.post(
-                self.endpoint,
-                headers=headers,
-                json={
-                    "model": self.model,
-                    "messages": messages,
-                    "max_tokens": 8192,
-                    "temperature": 0.7,
-                },
-                timeout=(self.CONNECT_TIMEOUT, self.READ_TIMEOUT),
-            )
-            resp.raise_for_status()
-            data = resp.json()
 
-            # ── 服务端会把 error 体塞进 HTTP 200（2026-09-15 医师接骨）──
-            # 实测 DeepSeek 排队超时返回的就是 200 + {"error":{"message":"..."}}。
-            # 旧代码直接取 data["choices"] → KeyError → 被下面 except 兜成
-            # "[LLM错误] 'choices'"，把服务端原话换成了最没用的一条信息。
-            if isinstance(data, dict) and data.get("error"):
-                err = data["error"]
-                msg = err.get("message") if isinstance(err, dict) else str(err)
-                self._last_usage = {}
-                return f"[LLM错误] 服务端拒绝: {msg}"
-            if not isinstance(data, dict) or not data.get("choices"):
-                self._last_usage = {}
-                return f"[LLM错误] 响应缺少 choices 字段: {str(data)[:300]}"
+        max_extra = self._max_extra_retries()
+        total_attempts = 1 + max_extra
+        last_exc: Exception | None = None
 
-            usage = data.get("usage", {})
-            prompt_details = usage.get("prompt_tokens_details", {}) or {}
-            self._last_usage = {
-                "prompt_tokens": usage.get("prompt_tokens", 0),
-                "completion_tokens": usage.get("completion_tokens", 0),
-                "total_tokens": usage.get("total_tokens", 0),
-                "cached_tokens": prompt_details.get("cached_tokens", 0),
-            }
-            choice = data["choices"][0]["message"]
-            content = choice.get("content", "")
-            # 推理模型: content可能为空(reasoning吃掉全部token)
-            # 仅在content确实为空时fallback到reasoning_content
-            if not content and choice.get("reasoning_content"):
-                content = choice["reasoning_content"]
-            # ── 空回复要给出解释，不能返回 ''（2026-09-15 接骨）──
-            # 旧行为：返回 '' → CLI 打印 "(无输出)"，用户无法判断是模型坏了还是
-            # token 用尽了。实测 mimo/glm/oneapi 都会出现这种空 content。
-            if not content:
-                finish = data["choices"][0].get("finish_reason", "")
-                return (f"[LLM空回复] 模型未产出正文（finish_reason={finish}）。"
-                        f"多为推理占满 max_tokens——请调大 max_tokens 或换模型。")
-            return content
-        except Exception as e:
-            return f"[LLM错误] {type(e).__name__}: {e}"
+        for attempt in range(total_attempts):
+            try:
+                import requests
+                headers = {"Content-Type": "application/json"}
+                if self.api_key and self.api_key != "lm-studio":
+                    headers["Authorization"] = f"Bearer {self.api_key}"
+
+                resp = requests.post(
+                    self.endpoint,
+                    headers=headers,
+                    json={
+                        "model": self.model,
+                        "messages": messages,
+                        "max_tokens": 8192,
+                        "temperature": 0.7,
+                    },
+                    timeout=(self.CONNECT_TIMEOUT, self.READ_TIMEOUT),
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                # ── 服务端会把 error 体塞进 HTTP 200（2026-09-15 医师接骨）──
+                if isinstance(data, dict) and data.get("error"):
+                    err = data["error"]
+                    msg = err.get("message") if isinstance(err, dict) else str(err)
+                    self._last_usage = {}
+                    return f"[LLM错误] 服务端拒绝: {msg}"
+                if not isinstance(data, dict) or not data.get("choices"):
+                    self._last_usage = {}
+                    return f"[LLM错误] 响应缺少 choices 字段: {str(data)[:300]}"
+
+                usage = data.get("usage", {})
+                prompt_details = usage.get("prompt_tokens_details", {}) or {}
+                self._last_usage = {
+                    "prompt_tokens": usage.get("prompt_tokens", 0),
+                    "completion_tokens": usage.get("completion_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0),
+                    "cached_tokens": prompt_details.get("cached_tokens", 0),
+                }
+                choice = data["choices"][0]["message"]
+                content = choice.get("content", "")
+                if not content and choice.get("reasoning_content"):
+                    content = choice["reasoning_content"]
+                if not content:
+                    finish = data["choices"][0].get("finish_reason", "")
+                    return (f"[LLM空回复] 模型未产出正文（finish_reason={finish}）。"
+                            f"多为推理占满 max_tokens——请调大 max_tokens 或换模型。")
+                return content
+
+            except Exception as e:
+                last_exc = e
+                is_retryable = self._is_retryable(e)
+                is_429 = self._is_rate_limited(e)
+                # 429 的最大额外次数可能比默认小
+                max_for_429 = self._max_extra_retries(is_429=is_429)
+                can_retry = (is_retryable or is_429) and attempt < (max_for_429)
+                if can_retry:
+                    delay = self._RETRY_DELAY_429 if is_429 else self._RETRY_DELAYS[min(attempt, len(self._RETRY_DELAYS) - 1)]
+                    time.sleep(delay)
+                    continue
+                # 不可重试或重试耗尽 → 打日志 + 返回人话
+                n_retries = attempt  # 额外重试次数
+                human = self._human_error(e)
+                logger.warning("openllm.provider chat failed (attempt %d/%d): %s",
+                               attempt + 1, 1 + max_for_429, str(e))
+                return f"[LLM错误] {human}（{type(e).__name__}，已重试{n_retries}次）"
+
+        # 不应到达此处，防御性兜底
+        assert last_exc is not None
+        human = self._human_error(last_exc)
+        return f"[LLM错误] {human}（{type(last_exc).__name__}，已重试{max_extra}次）"

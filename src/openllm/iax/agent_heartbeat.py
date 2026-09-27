@@ -11,6 +11,7 @@ PERCEIVE → DECIDE → EXECUTE → LEARN → FEEDBACK
 import time
 from pathlib import Path
 from typing import Optional
+import os
 from openllm.core.models import (Message, Context, Prediction, RiskAssessment,
                                   Proposal, Critique, Decision, ActionResult)
 from openllm.core.protocol import HeartbeatContext
@@ -70,6 +71,9 @@ def execute_tick(agent, msg: Message):
 
         # ═══ Phase 3: EXECUTE（执行）═══
         _execute(agent, hc, turn)
+
+        # ═══ Phase 3.5: SYNTHESIZE（综合消化）═══
+        _synthesize(agent, msg, hc, turn)
 
         # ═══ Phase 4: LEARN（学习）═══
         _learn(agent, hc, turn)
@@ -378,6 +382,195 @@ def _handle_tool_validation(agent, decision, result, turn):
         turn.trace_phase("validate", "skip", detail=str(_tv_err)[:80])
 
 
+# ── 刀⑧(2026-09-26): 工具调用摘要（心跳 add_action 入账 + CLI 轨迹前缀用）──
+
+def _tool_call_summary(tc) -> dict:
+    """把 decision.tool_calls 的一项压成 {"name":…,"arg":…}。
+
+    兼容 dict({"name","args"}) 与裸对象/字符串；arg 取首个参数值截30字符。
+    纯字符串化字段——保证 turn.actions JSON 可序列化（checkpoint 持久化路径）。
+    """
+    if isinstance(tc, dict):
+        name = tc.get("name", "?")
+        args = tc.get("args") or {}
+        first = next(iter(args.values()), "") if isinstance(args, dict) and args else args
+        return {"name": str(name), "arg": str(first)[:30]}
+    return {"name": str(tc)[:30], "arg": ""}
+
+
+# ── Phase 3.5: SYNTHESIZE（综合消化）────────────────────
+
+def _synthesize(agent, msg, hc, turn):
+    """综合消化：让模型消化工具结果后生成最终回答，而非裸吐工具输出。
+
+    仅在 decision 带 tool_calls 且执行成功且 provider 可用时触发。
+    最多 2 轮：综合→模型输出→(若仍带TOOL_CALLS)→再执行→再综合。
+    失败语义：任何异常回退旧行为 _last_output=result.output。
+    开关：OPENLLM_HEARTBEAT_SYNTH=0/off 时跳过（默认开）。
+    """
+    # 开关检查
+    if os.environ.get("OPENLLM_HEARTBEAT_SYNTH", "1").strip().lower() in ("0", "off"):
+        turn.trace_phase("synthesize", "skip", detail="disabled")
+        return
+
+    decision = hc.decision
+    result = hc.result
+
+    # 前置条件：有 tool_calls + 执行成功
+    if not getattr(decision, "tool_calls", None) or not getattr(result, "success", False):
+        return
+
+    # provider 可用性
+    provider = getattr(getattr(agent, "octopus", None), "left", None)
+    if provider is None:
+        return
+    provider = getattr(provider, "provider", None)
+    if provider is None or not getattr(provider, "_available", False):
+        turn.trace_phase("synthesize", "skip", detail="provider_unavailable")
+        return
+
+    # extract_tool_calls 容错
+    _extract = getattr(getattr(agent, "octopus", None), "left", None)
+    _extract_fn = getattr(_extract, "_extract_tool_calls", None) if _extract else None
+    _isn_exec = getattr(getattr(agent, "isn", None), "execute", None)
+
+    t_synth = time.time()
+    synth_output = None
+    try:
+        # 截断工具结果，防止 prompt 爆炸
+        _tool_out = (result.output or "")[:4000]
+        _original_q = getattr(msg, "text", "") or ""
+
+        messages = [
+            {"role": "system", "content": (
+                "你是openLLM——一个自主Agent，必须以openLLM自称，不要以底层模型名自称。"
+            )},
+            {"role": "user", "content": _original_q},
+            {"role": "assistant", "content": f"工具执行结果：\n{_tool_out}"},
+            {"role": "user", "content": (
+                "基于工具结果回答用户。如果还需要更多工具，"
+                "按格式输出 TOOL_CALLS: {...}；否则直接给最终回答，不要输出TOOL_CALLS行。"
+            )},
+        ]
+
+        out = provider.chat(messages)
+        if not out or not str(out).strip():
+            # 刀⑥: 空回复重试一次——附提示词强制表态。首次空先打点
+            # skip(empty_response)；重试仍空时把该条改写为终态
+            # empty_response_retried（不追加第二条：旧测试按"synthesize
+            # 打点恰1条"断言，追加即基线外新增失败——见现状摘要决策1）。
+            turn.trace_phase("synthesize", "skip", detail="empty_response")
+            _empty_mark = (turn.phase_metrics[-1]
+                           if getattr(turn, "phase_metrics", None) else None)
+            messages.append({"role": "assistant", "content": "(空回复)"})
+            messages.append({"role": "user", "content": (
+                "上一次回复为空。请基于以上工具结果直接给出最终回答；"
+                "若信息不足，请明确说明缺什么。不要输出TOOL_CALLS行，不要留空。"
+            )})
+            out = provider.chat(messages)
+            if not out or not str(out).strip():
+                if _empty_mark is not None:
+                    _empty_mark["detail"] = "empty_response_retried"[:100]
+                else:
+                    turn.trace_phase("synthesize", "skip",
+                                     detail="empty_response_retried")
+                return  # 交给CLI墓碑（⑥-2）：本轮仍失败但已被CLI记账
+
+        # last_tool_output：跟踪综合循环中最后一轮工具执行的原始输出
+        from openllm.iai.octopus import _LeftBrain
+        last_tool_output = _tool_out  # 初始 = 第一轮工具结果前4000字符
+
+        # 最多 2 轮回喂循环
+        _rounds = 1
+        _isn_call_count = 0
+        for _round in range(2):
+            calls = _extract_fn(out) if _extract_fn else []
+            if not calls or _isn_exec is None:
+                break
+
+            # 模型仍需要工具 → 执行下一轮
+            tool_result = _isn_exec(
+                Decision(action="execute", approved=True,
+                         reason="heartbeat-synth", tool_calls=calls))
+            _isn_call_count += 1
+            last_tool_output = str(getattr(tool_result, "output", "") or "")
+
+            # 将本轮 assistant+工具结果追加到 messages
+            messages.append({"role": "assistant", "content": out})
+            messages.append({"role": "user", "content": (
+                f"工具执行结果：\n{last_tool_output[:4000]}\n\n"
+                "基于以上工具结果继续回答用户。如果还需要工具，"
+                "按同样格式输出TOOL_CALLS；否则直接给出最终回答，"
+                "不要输出TOOL_CALLS行。"
+            )})
+            # 记账
+            try:
+                agent._record_inference("synthesize")
+            except Exception:
+                pass
+            out = provider.chat(messages)
+            _rounds = _round + 2
+
+        # 清理残留 TOOL_CALLS 行，采用清理后文本
+        synth_output = _LeftBrain._TOOLCALL_RE.sub("", out).strip() if out else ""
+
+        # ── 强制收口轮：综合正文空但有工具结果时，再逼一次 ──
+        if not synth_output and last_tool_output:
+            # 确保 last_tool_output 在 messages 中（以防从未进循环）
+            if not any("工具执行原始结果" in m.get("content", "") or
+                       "工具执行结果" in m.get("content", "")
+                       for m in messages if m["role"] == "user"):
+                pass  # 已在 messages 中，不重复
+            messages.append({"role": "user", "content": (
+                "禁止再调用任何工具。基于以上已有的工具执行结果，"
+                "直接给出对用户的最终回答（含你对内容的理解与看法）。"
+                "不要输出TOOL_CALLS行。"
+            )})
+            try:
+                out2 = provider.chat(messages)
+                synth_output = _LeftBrain._TOOLCALL_RE.sub("", out2).strip() if out2 else ""
+                _isn_call_count = _isn_call_count  # 收口轮不算 isn_exec
+                _rounds += 1  # 收口轮记入 rounds
+            except Exception:
+                synth_output = ""  # 收口失败，走回退阶梯
+
+        # ── 回退阶梯 + 状态诚实 ──
+        if synth_output:
+            # a) 综合正文非空 → 用它，ok
+            turn.trace_phase("synthesize", "ok",
+                             duration_ms=(time.time() - t_synth) * 1000,
+                             detail=f"len={len(synth_output)} rounds={_rounds}")
+        elif last_tool_output:
+            # b) 综合正文空但有工具原始输出 → 降级使用，warn
+            synth_output = f"（综合未成文，以下为工具执行原始结果）\n{last_tool_output[:4000]}"
+            turn.trace_phase("synthesize", "warn",
+                             duration_ms=(time.time() - t_synth) * 1000,
+                             detail=f"fallback_tool_output len={len(synth_output)} rounds={_rounds}")
+        else:
+            # c) 全空 → 不写 hc.synth_output，error
+            synth_output = ""
+            turn.trace_phase("synthesize", "error",
+                             duration_ms=(time.time() - t_synth) * 1000,
+                             detail="empty_synth")
+
+    except Exception as e:
+        # 综合是增强不是关卡——失败回退现状
+        turn.trace_phase("synthesize", "error",
+                         duration_ms=(time.time() - t_synth) * 1000,
+                         detail=str(e)[:100])
+        synth_output = None  # 回退：让 _learn 取 result.output
+
+    # 记账（最后一轮）
+    try:
+        agent._record_inference("synthesize")
+    except Exception:
+        pass
+
+    # 传递综合结果给 _learn
+    if synth_output:
+        hc.synth_output = synth_output
+
+
 # ── Phase 4: LEARN ─────────────────────────────────────────
 
 def _learn(agent, hc, turn):
@@ -469,7 +662,11 @@ def _learn(agent, hc, turn):
     # 4.3 输出处理
     t9 = time.time()
     agent.session.compact_if_needed()
-    if getattr(decision, 'tool_calls', None) or getattr(decision, '_has_tools', False):
+    # P0.5: 优先取综合消化结果（_synthesize 回路），回退裸工具输出
+    _synth = getattr(hc, "synth_output", None)
+    if _synth:
+        agent._last_output = _synth
+    elif getattr(decision, 'tool_calls', None) or getattr(decision, '_has_tools', False):
         agent._last_output = result.output
     else:
         agent._last_output = proposal.content if proposal.content else result.output
@@ -502,7 +699,13 @@ def _learn(agent, hc, turn):
         if agent.isa.mode != "silent":
             agent.isa.respond(result.output)
 
-    turn.add_action("execute", result.output[:100])
+    turn.add_action("execute", result.output[:100],
+                    # 刀⑧(2026-09-26 会话连续性三修): 本轮工具调用摘要随
+                    # action 入账，供 CLI 回合轨迹前缀读取。add_action 的
+                    # **kwargs 是既有容器（session.py），Turn 结构零改动。
+                    # 每项 {"name","arg"}，arg 取首参数截30字符。
+                    tool_calls=[_tool_call_summary(tc) for tc in
+                                (getattr(decision, "tool_calls", None) or [])])
     # DR-20260917-01：_execute提前终结turn（cap拒绝303/验证拦截359）后仍会走到这里，
     # 二次complete曾致状态机异常+CLI崩溃。幂等：仅ACTIVE才完结。
     if getattr(turn, "status", None) == TurnStatus.ACTIVE.value:
