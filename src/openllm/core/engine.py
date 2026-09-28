@@ -218,19 +218,57 @@ class OpenLLMEngine:
         # restrict_self 不可逆且进程全域——默认关，避免破坏测试与合法工作流。
         self._apply_kernel_write_lock()
 
+        # G2-0928: seccomp UDP/DNS 子策略位（双轨第二轨，opt-in
+        # OPENLLM_SECCOMP_NET=block_udp，与 Landlock 互相独立）。
+        self._apply_seccomp_net_lock()
+
     def _apply_kernel_write_lock(self) -> None:
-        """Landlock 内核写锁 opt-in 上身（G1-0927）。失败只告警不阻塞启动。"""
+        """Landlock 内核沙盒锁 opt-in 上身（G1-0927 / v2-0928 厚化）。
+
+        v2d 诚实降级：任何"想开但没开成"的形态必须 WARNING 可 grep——
+        opt-in 却静默不生效 = 虚假安全感（阿佛洛狄忒判：opt-in默认关=无效）。
+        失败只告警不阻塞启动（安全增强不绊倒主业务）。
+        """
         if os.environ.get("OPENLLM_LANDLOCK") != "1":
             return
         try:
             from openllm.security.landlock import KernelWriteLock
-            result = KernelWriteLock.default().apply_and_verify()
+            lock = KernelWriteLock.from_env()
+            abi = lock.abi_version()
+            if abi < 1:
+                logger.warning(
+                    "Landlock 不可用（内核 ABI=%s）——OS 层防线未生效，"
+                    "仅剩 Python 层路径检查（core/sandbox.py）。"
+                    "UDP/DNS 面与地址面完全开放，由操作者环境负责。", abi)
+                return
+            result = lock.apply_and_verify()
             if result.ok:
-                logger.info("Landlock 内核写锁上身: %s", result.detail)
+                extra = f"; 网络面: {result.net_detail}" if result.net_enabled else ""
+                logger.info("Landlock 沙盒锁上身: %s%s", result.detail, extra)
+                if result.net_enabled and not result.net_verified:
+                    logger.warning("Landlock 网络面自证未过: %s", result.net_detail)
             else:
-                logger.warning("Landlock 内核写锁未生效: %s", result.detail)
+                logger.warning("Landlock 沙盒锁未生效: %s", result.detail)
         except Exception as exc:  # noqa: BLE001 — 安全增强不得阻断启动
-            logger.warning("Landlock 内核写锁异常（保持 Python 层检查）: %s", exc)
+            logger.warning("Landlock 沙盒锁异常（保持 Python 层检查）: %s", exc)
+
+    def _apply_seccomp_net_lock(self) -> None:
+        """seccomp UDP/DNS 封锁 opt-in 上身（G2-0928，判B双轨第二轨）。
+
+        Landlock ABI 7 管不了 DGRAM——UDP 面只有 seccomp 能收。
+        未激活时静默返回（opt-in）；激活但失败 WARNING（诚实降级）。
+        """
+        if os.environ.get("OPENLLM_SECCOMP_NET") != "block_udp":
+            return
+        try:
+            from openllm.security.seccomp_net import SeccompNetLock
+            result = SeccompNetLock.block_udp().apply_and_verify()
+            if result.ok:
+                logger.info("seccomp block_udp 上身: %s", result.detail)
+            else:
+                logger.warning("seccomp block_udp 未生效: %s", result.detail)
+        except Exception as exc:  # noqa: BLE001 — 安全增强不得阻断启动
+            logger.warning("seccomp block_udp 异常（UDP/DNS 面保持开放）: %s", exc)
 
     def _register_blood_vessels(self):
         """注册5个血管handler到消息总线。"""
