@@ -474,6 +474,7 @@ def find_similar(min_shared_keywords: int = 3, limit: int = 20) -> List[dict]:
 
     from collections import defaultdict
     kw_groups = defaultdict(list)
+    cards = [c for c in cards if c.get("card_id")]  # 脏卡跳过：单卡缺ID不炸全库扫描
     for c in cards:
         kws = set(c.get("keywords", []))
         for kw in kws:
