@@ -47,6 +47,8 @@ class HeartbeatContext:
     # P0.5(20260925)：综合消化回路产物（_synthesize 写→_learn 4.3 读，空=回退裸输出）。
     # 协议字段显式声明——不许隐式 setattr（防未来加 __slots__ 时静默炸）。
     synth_output: str = ""                             # IAX: 模型消化后的最终回答
+    # 加固④(20261001)：工具任务「空输出」告警（送达闸写→监控/终端读，None=未触发）。
+    tool_output_alarm: Optional[dict] = None           # IAX: 工具任务无产出告警（如有）
     
     # ── 研究层输出 ──
     research: Optional[dict] = None                    # 研究循环: 假说/实验/结论状态

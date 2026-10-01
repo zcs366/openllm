@@ -341,6 +341,75 @@ def _execute(agent, hc, turn):
     _handle_tool_validation(agent, decision, result, turn)
 
 
+def _guard_blank_tool_output(agent, hc, turn):
+    """工具任务「空输出」告警（加固④，2026-10-01）。
+
+    依据（承重账·带工具反事实）：把 ISN 桩化后，工具问句**一个字都没出，且没有任何报错**。
+    静默白卷比报错更坏——报错能修，白卷只能猜。故本函数是「工具任务」的送达闸。
+
+    判据（两条，不看工具是否失败——失败只是原因之一）：
+      ① 本轮是工具任务：`decision.tool_calls` 非空（或 `_has_tools`）
+      ② `_last_output` 去空白后为空
+
+    子型（仅用于告警文本，不改变是否告警）：
+      · 工具未产出：`result.success` 为假，或 `result.output` 为空
+      · 送达断链：工具成功且有输出，但最终输出仍为空（合成/回退环节掉了）
+
+    处置：ERROR 日志 + IKO trace(status=empty_output) + `hc.tool_output_alarm` 标记
+         + 把**显式告警文本**写进 `_last_output`（绝不静默交白卷）。
+    返回告警文本；未触发返回 None。
+    """
+    decision = getattr(hc, "decision", None)
+    tool_calls = getattr(decision, "tool_calls", None) or []
+    if not tool_calls and not getattr(decision, "_has_tools", False):
+        return None
+
+    # 已被明确拦截（风险/仲裁/权限）的，拦截处已经给过文案——不重复告警
+    if getattr(hc, "rejection_record", None):
+        return None
+
+    if (getattr(agent, "_last_output", "") or "").strip():
+        return None
+
+    result = getattr(hc, "result", None)
+    ok = bool(getattr(result, "success", False))
+    raw = getattr(result, "output", "") or ""
+    names = ", ".join(
+        (tc.get("name", "?") if isinstance(tc, dict) else str(tc)) for tc in tool_calls
+    ) or "工具"
+
+    if ok and raw.strip():
+        kind = "送达断链"
+        detail = f"工具任务无产出[{kind}]：tools={names} success=True 但最终输出为空"
+    else:
+        kind = "工具未产出"
+        detail = (f"工具任务无产出[{kind}]：tools={names} "
+                  f"success={ok} output_len={len(raw)}")
+
+    logger.error("%s | action=%s", detail, str(getattr(decision, "action", ""))[:80])
+    alarm = (f"【工具任务无产出·{kind}】{names}：本轮未返回可用结果"
+             f"（success={ok}，输出为空）——已告警，未交付结果。")
+
+    # 协议字段（core/protocol.py 显式声明）——本闸只写声明过的字段，不许隐式 setattr
+    hc.tool_output_alarm = {"kind": kind, "tools": names, "success": ok,
+                            "detail": detail}
+    if turn is not None:
+        try:
+            # Turn 上不改未知属性（同"不许隐式 setattr"的纪律）——留痕走既有两条正道：
+            turn.add_action("tool_empty_output", detail)
+            turn.trace_phase("execute", "empty_output", detail=detail)
+        except Exception:
+            pass
+    try:
+        agent.iko.trace("execute", "empty_output", detail=detail)
+    except Exception:
+        pass
+
+    agent._last_output = alarm
+    hc.output = alarm
+    return alarm
+
+
 def _handle_tool_validation(agent, decision, result, turn):
     """工具结果验证"""
     from openllm.core.tool_validator_types import ToolCall, validate_tool_result
@@ -676,6 +745,10 @@ def _learn(agent, hc, turn):
         agent._last_output = proposal.content if proposal.content else result.output
     hc.output = agent._last_output
 
+    # ── 加固④（2026-10-01）：工具任务不许安静地交白卷 ──
+    # 依据：承重账带工具反事实——把 ISN 桩化后，工具问句**一个字都没出且没有任何报错**。
+    _guard_blank_tool_output(agent, hc, turn)
+
     # ── 苏醒协议：检测并记录选择 ──
     try:
         agent._awakening_protocol.detect_choice_and_record(
@@ -694,14 +767,17 @@ def _learn(agent, hc, turn):
             "has_side_effects": bool(getattr(result, 'success', False) and getattr(result, 'output', '')),
             "option_count": max(1, len(getattr(proposal, 'evidence', []))),
         }
-        decision_dict = {"type": "execute", "content": result.output}
-        processed = agent.iko.process_output(result.output, ctx_for_iko, decision_dict)
+        # 加固④：IKO 输出处理取「告警后的输出」——否则交互模式下屏幕仍是白卷
+        # （无告警时 hc.output 与 result.output 对工具任务本就同值，零行为变更）
+        _out_for_iko = getattr(hc, "output", None) or result.output
+        decision_dict = {"type": "execute", "content": _out_for_iko}
+        processed = agent.iko.process_output(_out_for_iko, ctx_for_iko, decision_dict)
         if agent.isa.mode != "silent" and processed:
             agent.isa.respond(processed)
     except Exception as e:
         agent.iko.trace("output_process", "error", detail=str(e)[:100])
         if agent.isa.mode != "silent":
-            agent.isa.respond(result.output)
+            agent.isa.respond(getattr(hc, "output", None) or result.output)
 
     turn.add_action("execute", result.output[:100],
                     # 刀⑧(2026-09-26 会话连续性三修): 本轮工具调用摘要随
