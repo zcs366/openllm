@@ -24,6 +24,10 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional
 
+# 时间戳单一判定源（写侧收口 2026-10-01 成市拍板）：archive_old_records 读
+# RECALL/stateful_scores 时间戳必须过 coerce_ts（双格式容忍），不得裸比。
+from openllm.isa.timeutil import coerce_ts
+
 logger = logging.getLogger("openllm.ios.stateful_audit")
 
 # ─ 默认审计目录 ──
@@ -329,7 +333,13 @@ class StatefulAuditTrail:
                         continue
                     try:
                         rec = json.loads(line)
-                        if rec.get("timestamp", 0) < cutoff:
+                        # 单一判定源（成市拍板 2026-10-01）：原写法
+                        # `rec.get("timestamp",0) < cutoff` 遇 ISO 字符串 →
+                        # str<float TypeError，内层只捕 JSONDecodeError，一条脏行
+                        # 击穿整个归档（外层 except → return 0）。改过
+                        # openllm.isa.timeutil.coerce_ts 双格式容忍。
+                        ts_val = coerce_ts(rec.get("timestamp", rec.get("ts", 0)))
+                        if ts_val < cutoff:
                             # 归档：追加到archive文件
                             archive_file = self.archive_dir / f"scores_{cutoff:.0f}.jsonl"
                             self._append_jsonl(archive_file, rec)
@@ -364,8 +374,16 @@ class StatefulAuditTrail:
 
     def _append_recall_alert(self, session_id: str,
                              cumulative: float, threshold: float) -> None:
-        """自动追加RECALL告警记录。"""
-        recall_path = Path.home() / ".hermes" / "jiak" / "RECALL.jsonl"
+        """自动追加RECALL告警记录。
+
+        写侧时间戳规范（成市拍板 2026-10-01）：canonical 字段 `ts`（epoch
+        float）。优先走门房 scripts/recall_append.py（与 execution_recorder
+        同款 subprocess 模式，门房负责 enrich/哈希/容量守卫）；门房不可用
+        时回退为直写，但仍落规范字段，不再写 `timestamp`。
+        """
+        # Path.home() 调用时求值（测试可重定向 HOME；conftest 已隔离）
+        jiak_dir = Path.home() / ".hermes" / "jiak"
+        recall_path = jiak_dir / "RECALL.jsonl"
         if not recall_path.exists():
             return
 
@@ -375,9 +393,23 @@ class StatefulAuditTrail:
             "session_id": session_id,
             "cumulative_score": cumulative,
             "threshold": threshold,
-            "timestamp": time.time(),
+            "ts": time.time(),
             "message": f"跨session累积风险超阈值: {cumulative:.2f} > {threshold:.2f}",
         }
+
+        gate_script = jiak_dir / "scripts" / "recall_append.py"
+        if gate_script.exists():
+            try:
+                import subprocess
+                import sys
+                subprocess.run(
+                    [sys.executable, str(gate_script),
+                     json.dumps(alert_entry, ensure_ascii=False)],
+                    capture_output=True, timeout=10,
+                )
+                return
+            except Exception:
+                pass  # 门房失败不阻塞主流程，回退直写
 
         try:
             with open(recall_path, "a", encoding="utf-8") as f:

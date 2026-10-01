@@ -78,15 +78,33 @@ def poll_dreams() -> list[dict]:
 
 
 def record_to_recall(signal: dict):
-    """记录信号到RECALL"""
+    """记录信号到RECALL。
+
+    写侧时间戳规范（成市拍板 2026-10-01）：canonical 字段 `ts`（epoch
+    float）。优先走门房 scripts/recall_append.py（与 execution_recorder
+    同款模式）；门房不可用时回退直写，但仍落规范字段，不再写 `timestamp`。
+    """
+    record = {
+        "type": "isn_signal",
+        "signal_type": signal.get("type"),
+        "from": signal.get("from"),
+        "payload": signal.get("payload"),
+        "ts": time.time(),
+    }
+    gate = os.path.join(os.path.dirname(RECALL_PATH), "scripts", "recall_append.py")
+    if os.path.exists(gate) and os.path.exists(RECALL_PATH):
+        try:
+            import subprocess
+            import sys
+            subprocess.run(
+                [sys.executable, gate, json.dumps(record, ensure_ascii=False)],
+                capture_output=True, timeout=10,
+            )
+            return
+        except Exception:
+            pass  # 门房失败不阻塞主流程，回退直写
     try:
         with open(RECALL_PATH, "a") as f:
-            f.write(json.dumps({
-                "type": "isn_signal",
-                "signal_type": signal.get("type"),
-                "from": signal.get("from"),
-                "payload": signal.get("payload"),
-                "timestamp": time.time()
-            }, ensure_ascii=False) + "\n")
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
         pass

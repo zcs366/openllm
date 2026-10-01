@@ -174,7 +174,10 @@ class RecallProvider:
                 "tags": request.tags,
                 "importance": request.importance,
                 "session_id": request.session_id,
-                "timestamp": time.time(),
+                # 写侧规范字段（成市拍板 2026-10-01）：ts = epoch float。
+                # 本路径已走门房 validate_and_append；字段名统一，门房对
+                # ts/timestamp 均豁免于内容哈希（_EXCLUDE_FIELDS）。
+                "ts": time.time(),
             }
 
             result = validate_and_append(record)
