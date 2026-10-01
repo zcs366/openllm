@@ -498,8 +498,9 @@ class TestClarificationLambdaDecrease:
             )
         assert self.pipe.calibrator.should_rollback() is True
 
-        # 触发透明回滚
-        self.pipe.calibrator.trigger_transparency_rollback(domain="general")
+        # 透明回滚：IKO 只提议，IOS 授权后才执行（测/评/改三分离）
+        proposal = self.pipe.calibrator.propose_transparency_rollback(domain="general")
+        self.pipe.calibrator.apply_transparency_rollback(proposal, authorized_by="IOS")
         lam = self.pipe.calibrator.get_current_lambda()
         assert lam >= 0.6
 
@@ -724,8 +725,9 @@ class TestLambdaBounds:
             )
 
     def test_transparency_rollback_lambda_in_bounds(self) -> None:
-        """透明回滚后 λ 在 [0, 1]。"""
-        self.calibrator.trigger_transparency_rollback(domain="test")
+        """透明回滚后 λ 在 [0, 1]（提议 → IOS 授权执行）。"""
+        proposal = self.calibrator.propose_transparency_rollback(domain="test")
+        self.calibrator.apply_transparency_rollback(proposal, authorized_by="IOS")
         lam = self.calibrator.get_current_lambda()
         assert LAMBDA_MIN <= lam <= LAMBDA_MAX
         assert lam >= 0.6

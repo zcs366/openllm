@@ -136,14 +136,20 @@ class TestRollback:
             calibrator.update(FeedbackSignal.CLARIFIED, 0.5)
         assert not calibrator.should_rollback()
 
-    def test_trigger_transparency_rollback(
+    def test_transparency_rollback_is_proposal_then_ios_authorized_apply(
         self, calibrator: LambdaCalibrator
     ) -> None:
-        """触发透明回滚后λ提升至≥0.6，连续计数归零。"""
+        """回滚走两步：IKO 只提议（不动 λ）→ IOS 授权才执行。"""
         for _ in range(3):
             calibrator.update(FeedbackSignal.CLARIFIED, 0.5)
         assert calibrator.should_rollback()
-        calibrator.trigger_transparency_rollback("code")
+
+        before = calibrator.get_current_lambda()
+        proposal = calibrator.propose_transparency_rollback("code")
+        assert proposal["proposal"] == "transparency_rollback"
+        assert calibrator.get_current_lambda() == before, "提议阶段镜子不许动手"
+
+        assert calibrator.apply_transparency_rollback(proposal, authorized_by="IOS") is True
         assert calibrator.get_current_lambda() >= 0.6
         # 回滚后不再触发
         assert not calibrator.should_rollback()

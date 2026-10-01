@@ -18,19 +18,23 @@ lambda_calibrator.py — IKO λ 自校准器
   CLARIFIED                  → λ -= 0.03 + 触发transparent rollback
   IGNORED                    → λ不变
 
-回滚判定：
-  - 连续3次CLARIFIED → True
-  - 单次高置信度REJECTED → True
-  - λ跌至0.3以下 → True
+回滚判定与执行（2026-10-01 澄清·测/评/改三分离）：
+  - **判定**条件（`should_rollback`）：连续3次CLARIFIED / 单次高置信度REJECTED / λ<0.3
+  - IKO 只能 `propose_transparency_rollback()` 出**提议书**——它是镜子，不改状态
+  - `apply_transparency_rollback(..., authorized_by="IOS")` 才动 λ：判定归 IOS，执行归 ISN
+  - 未授权调用一律拒绝并记 ERROR（原先的 trigger_transparency_rollback 直接改 λ，已拆）
 """
 
 import json
+import logging
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
 
 from openllm.iko.feedback_collector import FeedbackSignal
+
+logger = logging.getLogger(__name__)
 
 
 # ── λ 边界约束 ──
@@ -39,6 +43,7 @@ LAMBDA_MAX: float = 1.0
 LAMBDA_DEFAULT: float = 0.5
 ROLLBACK_THRESHOLD: float = 0.3
 CLARIFIED_STREAK_LIMIT: int = 3
+ROLLBACK_TARGET_LAMBDA: float = 0.6   # 透明回滚的目标 λ（保守安全区）
 
 
 @dataclass
@@ -155,20 +160,73 @@ class LambdaCalibrator:
             return True
         return False
 
-    def trigger_transparency_rollback(self, domain: str) -> None:
-        """强制提高输出透明度（透明回滚）。
+    def transparency_rollback_reason(self) -> str:
+        """说明「为何该回滚」——供提议书使用（本方法不改任何状态）。"""
+        if self._consecutive_clarified >= CLARIFIED_STREAK_LIMIT:
+            return f"连续 {self._consecutive_clarified} 次 CLARIFIED"
+        if self._last_high_confidence_rejected:
+            return "出现高置信度 REJECTED"
+        if self._state.value < ROLLBACK_THRESHOLD:
+            return f"λ={self._state.value:.3f} 低于阈值 {ROLLBACK_THRESHOLD}"
+        return "未达回滚条件"
 
-        将λ强制提升至0.6（保守安全区），并记录回滚事件。
-        典型用途：用户连续追问或高置信度错误后，系统主动提高输出可解释性。
+    # ═══ 测/评/改三分离（2026-10-01 配平·动作6：IKO 去手）═══════
+    # IKO 是**镜子**（观测/评测），**没有改状态的权柄**：判定归 IOS，执行归 ISN。
+    # 原先的 trigger_transparency_rollback() 直接改写 λ —— 镜子长了手，本批拆掉。
+    def propose_transparency_rollback(self, domain: str) -> dict:
+        """**只提议，不动手**：产出提议书，交 IOS 裁决。
 
-        Args:
-            domain: 触发回滚的领域标识符（如 "math", "code", "general"）
+        Returns:
+            {proposal, domain, current_lambda, target_lambda, reason, evidence}
         """
-        self._state.value = max(0.6, self._state.value)
+        return {
+            "proposal": "transparency_rollback",
+            "domain": domain,
+            "current_lambda": self._state.value,
+            "target_lambda": max(ROLLBACK_TARGET_LAMBDA, self._state.value),
+            "reason": self.transparency_rollback_reason(),
+            "evidence": {
+                "consecutive_clarified": self._consecutive_clarified,
+                "last_high_confidence_rejected": self._last_high_confidence_rejected,
+                "lambda": self._state.value,
+                "rollback_threshold": ROLLBACK_THRESHOLD,
+                "should_rollback": self.should_rollback(),
+            },
+        }
+
+    def apply_transparency_rollback(self, proposal: dict, *, authorized_by: str) -> bool:
+        """**执行**透明回滚——只接受 IOS 的授权（`authorized_by="IOS"`）。
+
+        未授权一律**拒绝并吼一声**（ERROR 日志），λ 一个字节都不动。
+        依据：测/评/改三分离——IKO 评测、IOS 裁决、ISN 执行（动作6）。
+
+        Returns:
+            True=已执行；False=被拒（授权来源非法或提议书非法）。
+        """
+        if authorized_by != "IOS":
+            logger.error(
+                "IKO 拒绝执行回滚：授权来源 %r 非法（唯一合法来源=IOS）。判定归 IOS，执行归 ISN。",
+                authorized_by,
+            )
+            return False
+        if not isinstance(proposal, dict) or proposal.get("proposal") != "transparency_rollback":
+            logger.error("IKO 拒绝执行回滚：提议书格式非法（%r）", proposal)
+            return False
+
+        target = proposal.get("target_lambda", ROLLBACK_TARGET_LAMBDA)
+        try:
+            target = float(target)
+        except (TypeError, ValueError):
+            logger.error("IKO 拒绝执行回滚：target_lambda 非法（%r）", target)
+            return False
+
+        self._state.value = max(target, self._state.value)
+        self._state.value = max(LAMBDA_MIN, min(LAMBDA_MAX, self._state.value))
         self._state.confidence = max(0.3, self._state.confidence)
         self._consecutive_clarified = 0
         self._last_high_confidence_rejected = False
         self._state.last_calibration = time.time()
+        return True
 
     def get_current_lambda(self) -> float:
         """返回当前λ值。
