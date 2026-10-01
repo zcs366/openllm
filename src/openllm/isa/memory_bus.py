@@ -17,6 +17,7 @@ ISA和ICE的唯一记忆接口。替代五套存储的直连模式。
 import time
 import math
 import logging
+from functools import lru_cache
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
@@ -70,19 +71,33 @@ def _get_jieba():
             _jieba = False  # 标记不可用，fallback到split
     return _jieba
 
+@lru_cache(maxsize=20000)
+def _split_words(text: str) -> tuple:
+    """昂贵的那一半：分词。**只缓存这一半**——纯函数，同输入必得同输出。
+
+    2026-10-01 配平（D-20261001-OTB 动作1）：实测一次「1+1」问询调用 tokenize
+    11,910 次，jieba.cut 累计 11.23s——重复分词把十几秒的问询时间吃掉了大半。
+    这里去掉的是**重复计算**，不改变任何输出（等价性由钉子逐字节证明）。
+    """
+    jb = _get_jieba()
+    if jb is not None and jb is not False:
+        return tuple(jb.cut(text.lower()))
+    return tuple(text.lower().split())
+
+
 def tokenize(text: str) -> set:
     """
     中英文混合分词。中文走jieba，英文走split。
     返回去重关键词集合（小写，长度>1）。
+
+    2026-10-01 配平：
+      · 分词结果缓存（见 _split_words），set 每次现建——调用方拿到的仍是各自独立的
+        可变对象，杜绝共享 set 被下游改写的隐患。
+      · 刻意**不启用 HMM=False**：那会改变分词输出，属行为变更，不在「等价提速」范围。
     """
     if not text:
         return set()
-    jb = _get_jieba()
-    if jb is not None and jb is not False:
-        words = list(jb.cut(text.lower()))
-    else:
-        words = text.lower().split()
-    return {w for w in words if len(w) > 1 and w.strip()}
+    return {w for w in _split_words(text) if len(w) > 1 and w.strip()}
 
 
 # ═══════════════════════════════════════════════

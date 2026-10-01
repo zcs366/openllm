@@ -16,6 +16,9 @@ from openllm.core.provider_impl import LLMProvider
 
 # ── P2-7: 简单输入快路径常量 ──
 _FAST_PATH_MAX_LEN = 50  # user_message长度阈值
+# 2026-10-01 配平（D-20261001-OTB 动作2）：探活 TTL。实测一轮问询内 health_check
+# 被调 4 次、每次真发一次 ping（累计 3.08s）。缓存的是「还活着」这个结论，不是失败。
+_HEALTH_TTL_SEC = 60.0
 _TOOL_KEYWORDS = re.compile(
     r'搜|查|列|读|写|执行|terminal|search|find|run|exec|grep|cat|ls|rm|mv|cp',
     re.IGNORECASE,
@@ -73,16 +76,31 @@ class 章鱼I:
             "file_watcher": FileWatcherBrain(),
             "index": IndexBrain(),
         }
+        # 2026-10-01 配平：探活结论的缓存槽（只缓存成功，见 health_check）
+        self._health_cache = None
+        self._health_ts = 0.0
         print("  章鱼I 推理引擎就绪 · 左右脑在线 · 触手脑在线")
     
     def health_check(self) -> str:
-        """自检。返回当前健康等级。"""
+        """自检。返回当前健康等级。
+
+        2026-10-01 配平（D-20261001-OTB 动作2）：
+          · 实测一轮「1+1」问询内本函数被调用 4 次（每次由 d0_snapshot 触发），
+            每次真发一次 ping，累计 3.08s。改为 _HEALTH_TTL_SEC 内复用上次结论。
+          · **失败绝不缓存**：探活失败必须当次可见——可以少探，不可以把「死了」
+            伪装成「还活着」。这是本改动的红线。
+        """
         if not self.left.provider._available:
-            return "MINIMAL"  # 无API=降级
+            return "MINIMAL"  # 无API=降级（廉价标记读，不涉网络，不走缓存）
+        now = time.time()
+        if self._health_cache is not None and (now - self._health_ts) < _HEALTH_TTL_SEC:
+            return self._health_cache
         try:
-            _ = self.left.provider.chat([{"role":"user","content":"ping"}])
+            _ = self.left.provider.chat([{"role": "user", "content": "ping"}])
+            self._health_cache, self._health_ts = "FULL", now
             return "FULL"
-        except:
+        except Exception:
+            self._health_cache, self._health_ts = None, 0.0  # 失败不缓存
             return "DEGRADED"
     
     def d0_snapshot(self) -> dict:
