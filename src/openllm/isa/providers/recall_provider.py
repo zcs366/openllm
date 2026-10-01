@@ -8,6 +8,16 @@ RecallProvider — RECALL时间线日志provider
 1. 加载RECALL.jsonl（最近N天）
 2. 对query做关键词匹配（简单文本搜索）
 3. 按时间+相关性排序
+
+时间戳纪律（2026-10-01 军师拍板，勿回退）：
+- 取值链 `timestamp → ts → _timestamp → _written_at`，每个候选过 `_coerce_ts`
+  （数值 / 数值字符串 / ISO8601 含 'Z' 与纯日期），规整后就地写回 epoch float。
+- **只有"时间已知且早于 cutoff"才过滤**；时间缺失/不可解析的记录保留，
+  计入 `last_load_stats['missing_ts']`。旧写法"缺失→0→被窗口丢掉"曾让
+  177 条真实记录里的 173 条隐形（且 `ts` 字段整条不读），是本次 P0 的病根。
+- 单条脏数据只影响本条：坏 JSON / 类型异常逐条跳过并计数，绝不击穿整条通道。
+- 统计只在实例首次加载时 warning 一次（`_load_records` 每 10s 缓存过期会重读，
+  逐次 warning 会变成新噪声），其后降 debug。
 """
 
 import json
@@ -15,6 +25,7 @@ import time
 import math
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -47,6 +58,37 @@ def _get_recall_append():
     return _recall_append
 
 
+def _coerce_ts(v: Any) -> float:
+    """健壮解析记录时间戳 → epoch 秒。
+
+    规则：int/float 直接用；纯数字字符串转 float；ISO8601 字符串
+    （支持结尾 'Z' 与 '2026-09-29' 纯日期）用 datetime.fromisoformat
+    解析（naive 按本地时间，与 time.time() 同基准）；无法解析或缺失 → 0
+    （保持"被 cutoff 过滤掉"的既有语义）。
+    """
+    if isinstance(v, bool):
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return 0.0
+        try:
+            return float(s)
+        except ValueError:
+            pass
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return 0.0
+        if dt.tzinfo is not None:
+            return dt.timestamp()
+        return datetime(dt.year, dt.month, dt.day, dt.hour, dt.minute,
+                        dt.second, dt.microsecond).timestamp()
+    return 0.0
+
+
 class RecallProvider:
     """RECALL时间线日志provider"""
 
@@ -54,6 +96,8 @@ class RecallProvider:
         self._path = recall_path or RECALL_PATH
         self._records: Optional[List[Dict]] = None
         self._loaded_at: float = 0
+        self.last_load_stats: Dict[str, int] = {}
+        self._warned_stats: bool = False
 
     @property
     def name(self) -> str:
@@ -188,6 +232,7 @@ class RecallProvider:
             "path": str(self._path),
             "exists": self._path.exists(),
             "record_count": self.count(),
+            "load_stats": dict(self.last_load_stats),
         }
 
     def _load_records(self, max_age_days: int = 30) -> List[Dict]:
@@ -201,6 +246,9 @@ class RecallProvider:
 
         records = []
         cutoff = now - (max_age_days * 86400)
+        n_ok = 0          # 时间已知且解析成功（无论是否保留）
+        n_bad = 0         # 单条解析失败（坏JSON/类型异常）→ 跳过
+        n_missing = 0     # 时间字段缺失/不可解析 → 保留并计入 missing_ts
 
         try:
             with open(self._path, "r", encoding="utf-8") as f:
@@ -210,14 +258,56 @@ class RecallProvider:
                         continue
                     try:
                         rec = json.loads(line)
-                        ts = rec.get("timestamp", rec.get("_written_at", 0))
-                        if ts >= cutoff:
+                        if not isinstance(rec, dict):
+                            n_bad += 1
+                            continue
+                        raw_ts, ts_field = 0, None
+                        for field in ("timestamp", "ts", "_timestamp", "_written_at"):
+                            if field in rec:
+                                raw_ts, ts_field = rec[field], field
+                                break
+                        ts = _coerce_ts(raw_ts)
+                        ts_known = ts_field is not None and ts > 0
+                        if ts_known:
+                            n_ok += 1
+                            if ts != raw_ts:
+                                # 就地规整成 epoch：下游(search/_compute_temperature)
+                                # 不再碰到原始字符串/异常类型
+                                rec[ts_field] = ts
+                        else:
+                            n_missing += 1
+                            if ts_field is not None:
+                                # 不可解析的脏值也规整为0：缺失≠丢弃，但下游
+                                # (search 的 `ts > 0`) 不得再拿字符串去比数字
+                                rec[ts_field] = 0.0
+                        # 语义（军师拍板 2026-10-01）：只有"时间已知且早于
+                        # cutoff"才过滤；缺失/不可解析不得静默丢弃
+                        if (not ts_known) or ts >= cutoff:
                             records.append(rec)
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        n_bad += 1
                         continue
         except OSError as e:
             logger.error(f"Failed to load RECALL: {e}")
             return []
+
+        # 单次汇总（不逐条刷日志）：脏数据只影响本条，不击穿整条通道
+        self.last_load_stats = {
+            "total_lines": n_ok + n_missing + n_bad,
+            "ok": n_ok,
+            "skipped_bad": n_bad,
+            "missing_ts": n_missing,
+            "kept": len(records),
+        }
+        if n_bad or n_missing:
+            # 只在首次加载时告警一次（2026-10-01 军师：_load_records 每 10 秒缓存过期
+            # 就会重读，逐次 warning 会变成新的日志噪声），其后降为 debug。
+            log = logger.warning if not self._warned_stats else logger.debug
+            self._warned_stats = True
+            log(
+                "RECALL %s: 保留%d条（时间ok: %d, 解析失败跳过: %d, "
+                "缺失/不可解析时间戳保留: %d）",
+                self._path, len(records), n_ok, n_bad, n_missing)
 
         self._records = records
         self._loaded_at = now
