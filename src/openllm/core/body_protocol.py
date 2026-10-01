@@ -101,3 +101,58 @@ class IKOBody(BodyInterface):
     def execute(self, hc, **kwargs):
         if self._iko and hc.result:
             hc.output = hc.result.output if hasattr(hc.result, 'output') else str(hc.result)
+
+
+# ═══════════════════════════════════════════════
+# 六体显式接线（2026-10-01 配平 · 治「隐式接线、断了不响」）
+# ═══════════════════════════════════════════════
+# 病（实测）：ISN 以前是 `getattr(getattr(agent,"isn",None),"execute",None)` 取的——
+#   改名不报错、装不上就返回 None、然后静默跳过整个工具循环。
+#   这就是「工具异动，下面没了」能在系统里存活的机制。
+# 药（两条，缺一不可）：
+#   ① 启动即验 validate_bodies()：缺件**当场抛**，不许带病上工；
+#   ② 运行时取件 resolve_body_method()：缺件**必吼一声**（ERROR），不许静默。
+# 诚实标注：IAX 是**机制体**（本身就是心跳，无实例），故其「接线」= 本模块被加载。
+SIX_BODIES = {
+    "IAI": ("iai", ("gate", "emit")),
+    "ISA": ("isa", ("build_context", "respond")),
+    "IOS": ("ios", ("risk_check", "arbitrate")),
+    "ISN": ("isn", ("execute",)),
+    "IKO": ("iko", ("trace",)),
+    "IAX": (None, ()),   # 机制体：无实例
+}
+
+
+def validate_bodies(agent, strict: bool = True) -> dict:
+    """启动即验六体是否真的接上了。返回体检表；strict 时缺件抛 RuntimeError。"""
+    report: dict = {}
+    missing: list = []
+    for body, (attr, methods) in SIX_BODIES.items():
+        if attr is None:
+            report[body] = {"kind": "机制体", "ok": True, "missing": []}
+            continue
+        obj = getattr(agent, attr, None)
+        lack = []
+        if obj is None:
+            lack.append(f"agent.{attr}（实例缺失）")
+        else:
+            for m in methods:
+                if getattr(obj, m, None) is None:
+                    lack.append(f"agent.{attr}.{m}()")
+        report[body] = {"kind": "实例体", "ok": not lack, "missing": lack}
+        if lack:
+            missing.append(body)
+    if missing and strict:
+        raise RuntimeError(
+            "六体接线不全，拒绝带病启动：" + "；".join(f"{b} → {report[b]['missing']}" for b in missing))
+    return report
+
+
+def resolve_body_method(agent, body: str, method: str, *, logger=None):
+    """运行时显式取入口方法。缺件**不静默**：打 ERROR 后返回 None。"""
+    attr = SIX_BODIES.get(body.upper(), (body.lower(), ()))[0] or body.lower()
+    fn = getattr(getattr(agent, attr, None), method, None)
+    if fn is None and logger is not None:
+        logger.error("六体接线缺口：agent.%s.%s 不存在——本阶段该项能力缺失（非静默告警）",
+                     attr, method)
+    return fn

@@ -67,6 +67,15 @@ class Agent:
         self.isn = ISN()
         self.iko = IKO()
 
+        # 六体显式接线（2026-10-01 配平）：登记名册 + **启动即验**——
+        # 以前 ISN 靠 getattr 隐式取，改名不报错、断了静默跳过；现在缺件当场抛。
+        from .body_protocol import (BodyRegistry, IAIBody, IOSBody, ISNBody,
+                                    IKOBody, validate_bodies)
+        self.bodies = BodyRegistry()
+        for _body in (IAIBody(self.iai), IOSBody(self.ios), ISNBody(self.isn), IKOBody(self.iko)):
+            self.bodies.register(_body)
+        self.body_health = validate_bodies(self)
+
         # IAI订阅：IKO桥——推理事件trace记录（验证标准4：总线有订阅者）
         try:
             self.iai.subscribe(

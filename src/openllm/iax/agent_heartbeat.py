@@ -9,6 +9,7 @@ PERCEIVE → DECIDE → EXECUTE → LEARN → FEEDBACK
 - 执行层写：result, output, metrics
 """
 import time
+import logging
 from pathlib import Path
 from typing import Optional
 import os
@@ -16,7 +17,10 @@ from openllm.core.models import (Message, Context, Prediction, RiskAssessment,
                                   Proposal, Critique, Decision, ActionResult)
 from openllm.core.protocol import HeartbeatContext
 from openllm.core.session import TurnStatus
+from openllm.core.body_protocol import resolve_body_method
 from .awakening import AwakeningProtocol
+
+logger = logging.getLogger(__name__)
 
 def execute_tick(agent, msg: Message):
     """5阶段心跳：PERCEIVE→DECIDE→EXECUTE→LEARN→FEEDBACK
@@ -432,7 +436,7 @@ def _synthesize(agent, msg, hc, turn):
     # extract_tool_calls 容错
     _extract = getattr(getattr(agent, "octopus", None), "left", None)
     _extract_fn = getattr(_extract, "_extract_tool_calls", None) if _extract else None
-    _isn_exec = getattr(getattr(agent, "isn", None), "execute", None)
+    _isn_exec = resolve_body_method(agent, "ISN", "execute", logger=logger)
 
     t_synth = time.time()
     synth_output = None
