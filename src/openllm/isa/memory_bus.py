@@ -17,10 +17,37 @@ ISA和ICE的唯一记忆接口。替代五套存储的直连模式。
 import time
 import math
 import logging
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 logger = logging.getLogger("openllm.memory_bus")
+
+# ── 内置provider注册表（模块级常量，供_register_builtin_providers消费）──
+# 审计P1-1（2026-10-01）：注册失败/检索失败/写入失败不再只进日志——
+# 同步写 degradation_trace（main_loop 启动播报"近24h降级N次"）并记入
+# 实例字段，health_check() 经 _meta 暴露。控制流不变：降级仍是增强层。
+_BUILTIN_PROVIDERS = [
+    ("DeltaCapsuleProvider", ".providers.delta_capsule_provider", "DeltaCapsuleProvider"),
+    ("JiakProvider", ".providers.jiak_provider", "JiakProvider"),
+    ("RecallProvider", ".providers.recall_provider", "RecallProvider"),
+    ("CausalProvider", ".providers.causal_provider", "CausalProvider"),
+    ("UnifiedProvider", ".providers.unified_provider", "UnifiedProvider"),
+    ("SourceIndexProvider", ".providers.source_index_provider", "SourceIndexProvider"),
+]
+
+
+def _trace_degradation_safe(body: str, phase: str, exc: Exception, detail: str = "") -> None:
+    """接上现成可见通道 core.degradation_trace（main_loop 播报"近24h降级N次"）。
+
+    懒导入防 isa↔core 循环；helper 自身吞一切异常——记账绝不改变控制流，
+    降级仍是"增强层不是依赖层"（审计P1-1约束）。
+    """
+    try:
+        from ..core.degradation_trace import trace_degradation
+        trace_degradation(body, phase, exc, detail)
+    except Exception:  # noqa: BLE001 — 记账失败不得影响主流程
+        pass
 
 # ── Schema兼容性检查 ──
 # 下游消费者（ICE/ISA）检索时期望的最小MemoryRecord字段集
@@ -245,6 +272,13 @@ class MemoryBus:
         self._max_log = 100
         self._immune = None  # 惰性初始化（T-ISA-4免疫接线）
         self._immune_failed = False  # 免疫初始化失败标记（避免重复尝试）
+        # ── 降级可见性（审计P1-1，2026-10-01）──
+        # 本轮query()中抛异常的provider名单（每次query开头重置）
+        self._last_query_failures: Dict[str, str] = {}
+        # 本轮write()中抛异常的provider名单（每次write开头重置）
+        self._last_write_failures: Dict[str, str] = {}
+        # 内置provider注册失败名单（bus生命周期内累积）
+        self._register_failures: Dict[str, str] = {}
         self._register_builtin_providers()
 
     def _get_immune(self):
@@ -299,16 +333,10 @@ class MemoryBus:
 
         六个provider全部注册，失败静默降级。
         每个provider支持无参构造（延迟初始化），无循环依赖风险。
+        审计P1-1（2026-10-01）：失败除logger外同步写degradation_trace并记入
+        _register_failures（health_check暴露）——控制流不变，仍不阻断启动。
         """
-        _providers = [
-            ("DeltaCapsuleProvider", ".providers.delta_capsule_provider", "DeltaCapsuleProvider"),
-            ("JiakProvider", ".providers.jiak_provider", "JiakProvider"),
-            ("RecallProvider", ".providers.recall_provider", "RecallProvider"),
-            ("CausalProvider", ".providers.causal_provider", "CausalProvider"),
-            ("UnifiedProvider", ".providers.unified_provider", "UnifiedProvider"),
-            ("SourceIndexProvider", ".providers.source_index_provider", "SourceIndexProvider"),
-        ]
-        for name, mod_path, cls_name in _providers:
+        for name, mod_path, cls_name in _BUILTIN_PROVIDERS:
             try:
                 import importlib
                 mod = importlib.import_module(mod_path, package="openllm.isa")
@@ -316,6 +344,8 @@ class MemoryBus:
                 self.register(cls())
             except Exception as e:
                 logger.warning(f"{name}注册失败(降级): {e}")
+                self._register_failures[cls_name] = str(e)[:200]
+                _trace_degradation_safe("MemoryBus", "provider_register", e, cls_name)
 
     # ── Provider管理 ──
 
@@ -445,6 +475,7 @@ class MemoryBus:
         if immune_blocked is not None:
             return immune_blocked
 
+        self._last_write_failures = {}
         for provider in self._sorted_providers():
             try:
                 result = provider.store(request)
@@ -455,6 +486,9 @@ class MemoryBus:
                     return result
             except Exception as e:
                 logger.error(f"Provider '{provider.name}' 写入异常: {e}")
+                # 审计P1-1（2026-10-01）：写入异常进可见通道，控制流不变（continue）
+                self._last_write_failures[provider.name] = str(e)[:200]
+                _trace_degradation_safe("MemoryBus", "provider_write", e, provider.name)
                 continue
 
         # 所有provider都不接受
@@ -548,12 +582,16 @@ class MemoryBus:
 
         all_records: List[MemoryRecord] = []
 
+        self._last_query_failures = {}
         for provider in self._sorted_providers():
             try:
                 records = provider.search(query)
                 all_records.extend(records)
             except Exception as e:
                 logger.error(f"Provider '{provider.name}' 检索异常: {e}")
+                # 审计P1-1（2026-10-01）：检索异常进可见通道，控制流不变（continue）
+                self._last_query_failures[provider.name] = str(e)[:200]
+                _trace_degradation_safe("MemoryBus", "provider_query", e, provider.name)
                 continue
 
         if not all_records:
@@ -636,13 +674,30 @@ class MemoryBus:
         }
 
     def health_check(self) -> Dict[str, Any]:
-        """所有provider健康检查"""
+        """所有provider健康检查。
+
+        审计P1-1（2026-10-01）：新增 `_meta` 键暴露静默降级的可见性——
+        本轮query/write失败的provider名单、内置provider注册失败名单。
+        `_meta.status`: 无任何失败="ok"，有="degraded"（与其它provider的
+        status键语义一致，老消费者 .get("status") 不会读到None）。
+        """
         results = {}
         for name, provider in self._providers.items():
             try:
                 results[name] = provider.health()
             except Exception as e:
                 results[name] = {"status": "error", "error": str(e)}
+        has_failures = bool(
+            self._last_query_failures or self._last_write_failures
+            or self._register_failures
+        )
+        results["_meta"] = {
+            "status": "degraded" if has_failures else "ok",
+            "last_query_failures": dict(self._last_query_failures),
+            "last_write_failures": dict(self._last_write_failures),
+            "register_failures": dict(self._register_failures),
+            "degradation_log": str(Path.home() / ".openllm" / "output" / "degradation_log.jsonl"),
+        }
         return results
 
     def hybrid_rerank(
