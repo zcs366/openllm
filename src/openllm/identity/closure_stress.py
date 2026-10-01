@@ -59,6 +59,9 @@ try:
 except ImportError:
     SoulGrowthLedger = None  # type: ignore
 
+# 时间戳单一判定源（审计 P1-5）。isa 顶层包不依赖 identity，无环。
+from openllm.isa.timeutil import coerce_ts
+
 # ── 三区阈值 ──────────────────────────────────────────
 
 ABSORPTION_THRESHOLD = 0.5    # distance < 0.5 → 吸收区
@@ -355,12 +358,16 @@ class ClosureStressProbe:
                     line = line.strip()
                     if not line:
                         continue
+                    # 逐条 try：单条脏数据（JSON坏/非dict/ts混ISO串）不得击穿
+                    # 整轮。旧写法 rec_ts >= cutoff 裸比较，ISO 字符串混入即
+                    # TypeError，内层只捕 JSONDecodeError、外层只捕 OSError——
+                    # 与 recall 旧病灶同构（审计 P1-5）。coerce_ts 统一归一。
                     try:
                         rec = json.loads(line)
-                        rec_ts = rec.get("ts", 0)
+                        rec_ts = coerce_ts(rec.get("ts", 0)) if isinstance(rec, dict) else 0.0
                         if rec_ts >= cutoff:
                             records.append(rec)
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, TypeError, AttributeError):
                         continue
         except OSError:
             pass

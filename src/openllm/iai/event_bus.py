@@ -13,6 +13,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+# 时间戳单一判定源（审计 P1-5）：JSONL 外部混入 ISO/数值串 timestamp 时，
+# 裸 d.get("timestamp",0) > cutoff 即 TypeError；:176 except 只捕
+# JSONDecodeError/KeyError 会炸穿整个 load_from_jsonl（启动即死），
+# :158 同构。openllm.isa 顶层包不 import iai，无环。
+from openllm.isa.timeutil import coerce_ts
+
 try:
     from openllm.iai.event_semantic import SemanticMatcher, event_payload_to_text
 except ImportError:  # 语义引擎缺失不阻断总线（语义维度自动不可用）
@@ -154,8 +160,19 @@ class EventBus:
         if self._log_file.exists():
             try:
                 lines = self._log_file.read_text(encoding="utf-8").splitlines()
-                kept = [l for l in lines if l.strip() and
-                        json.loads(l).get("timestamp", 0) > cutoff]
+                kept = []
+                for l in lines:
+                    if not l.strip():
+                        continue
+                    # 逐条 coerce_ts：单条脏 timestamp 不得击穿整轮清理。
+                    # 坏 JSON 仍向外抛（与原语义一致——由下方 except 统一告警），
+                    # 但数值/ISO 混排的 TypeError 已在 coerce_ts 内消化。
+                    try:
+                        ts = coerce_ts(json.loads(l).get("timestamp", 0))
+                    except (TypeError, AttributeError):
+                        ts = 0.0
+                    if ts > cutoff:
+                        kept.append(l)
                 cleaned += len(lines) - len(kept)
                 if cleaned:
                     self._log_file.write_text(
@@ -173,9 +190,12 @@ class EventBus:
                 if not line.strip(): continue
                 try:
                     d = json.loads(line)
-                    if d.get("timestamp", 0) > cutoff:
+                    # coerce_ts：ISO/数值串 timestamp 归一为 float 再比 cutoff；
+                    # 旧写法裸比较遇 str 即 TypeError，except 捕不到→炸穿整轮
+                    if coerce_ts(d.get("timestamp", 0)) > cutoff:
                         self._history.append(d); loaded += 1
-                except (json.JSONDecodeError, KeyError): continue
+                except (json.JSONDecodeError, KeyError, AttributeError, TypeError):
+                    continue
         return loaded
 
 class BaseEventEmitter:

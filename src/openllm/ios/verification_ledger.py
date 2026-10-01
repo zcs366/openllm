@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from openllm.isa.timeutil import coerce_ts  # 时间戳单一判定源（审计 P1-5）
+
 logger = logging.getLogger("openllm.ios.verification_ledger")
 
 DEFAULT_LEDGER_PATH = Path.home() / ".openllm" / "governance" / "verification_ledger.jsonl"
@@ -127,9 +129,12 @@ class VerificationLedger:
         for ev in reversed(all_ev):
             if ev.target != target:
                 continue
-            try:
-                ts = datetime.fromisoformat(ev.ts).timestamp()
-            except ValueError:
+            # coerce_ts：容忍 ISO 与数值 ts；外部混入数值 ts 时旧写法
+            # datetime.fromisoformat(ev.ts)（只捕 ValueError）会 TypeError 炸穿。
+            # 不可解析/缺失 → 0 → 跳过本条继续向旧扫（与原 ValueError
+            # continue 语义一致——epoch0 恒过期，跳过=等价原行为）。
+            ts = coerce_ts(ev.ts)
+            if ts == 0.0:
                 continue
             if ts < cutoff:
                 return None  # 已过期——更早的也不会更新（行序即时间序）
@@ -152,11 +157,8 @@ class VerificationLedger:
         cutoff = datetime.now(timezone.utc).timestamp() - max_age_s
         fresh = []
         for ev in all_ev:
-            try:
-                ts = datetime.fromisoformat(ev.ts).timestamp()
-            except ValueError:
-                continue
-            if ts >= cutoff:
+            # coerce_ts：双格式容忍（同 fresh_evidence_for，不改变新鲜语义）
+            if coerce_ts(ev.ts) >= cutoff:
                 fresh.append(ev)
 
         matched: list[str] = []

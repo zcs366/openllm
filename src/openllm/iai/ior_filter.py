@@ -18,6 +18,11 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
+# 时间戳单一判定源（审计 P1-5）：JSONL 混入 ISO timestamp 时 sort key 裸
+# r.get("timestamp",0) 在 str<float 比较处抛 TypeError 外溢。openllm.isa
+# 顶层包不 import iai，无环。
+from openllm.isa.timeutil import coerce_ts
+
 
 def _topic_hash(topic: str) -> str:
     """主题去重键：归一化后取sha256前8位。"""
@@ -89,5 +94,7 @@ class IoRFilter:
                             continue
             except OSError:
                 pass
-        records.sort(key=lambda r: r.get("timestamp", 0), reverse=True)
+        # coerce_ts 归一 sort key：ISO 串混入不再 TypeError 外溢；
+        # 解析失败→0，按真实时间归类（不可解析的最旧，排最后）
+        records.sort(key=lambda r: coerce_ts(r.get("timestamp", 0)), reverse=True)
         return [r["topic"] for r in records[:limit]]

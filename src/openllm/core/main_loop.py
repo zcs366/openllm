@@ -22,6 +22,12 @@ from .provider_impl import LLMProvider
 # Session
 from .session import Session, Turn, TurnStatus, create_session
 
+# 时间戳单一判定源（审计 P1-5）：degradation_log 的 timestamp 混入 ISO/数值串
+# 时，裸 rec.get("timestamp",0) > cutoff 即 TypeError，被外层 except Exception
+# 吞掉→整轮计数清零、启动横幅"近24h降级N次"永远显示0（双重静默）。与
+# isa/memory_bus._trace_degradation_safe 写入端（本条环的另一半）保持同数口径。
+from ..isa.timeutil import coerce_ts
+
 # 可选依赖
 try:
     from .tool_validator_types import ToolCall as _TVToolCall, ValidationResult as _TVResult, validate_tool_result as _tv_validate
@@ -175,7 +181,9 @@ class Agent:
                 clock_sym = "?"
                 clock_detail = "(error)"
 
-        # 4. 近24h降级记录
+        # 4. 近24h降级记录（写入端：core.degradation_trace / isa.memory_bus
+        #    _trace_degradation_safe，timestamp=time.time() 浮点；读取端逐条
+        #    coerce_ts，单条脏 ISO/数值串不得清零整轮计数——双重静默修复）
         degraded = 0
         try:
             log_path = Path.home() / ".openllm" / "output" / "degradation_log.jsonl"
@@ -188,10 +196,10 @@ class Agent:
                             continue
                         try:
                             rec = json.loads(line)
-                            if rec.get("timestamp", 0) > cutoff:
+                            if coerce_ts(rec.get("timestamp", 0)) > cutoff:
                                 degraded += 1
-                        except (json.JSONDecodeError, KeyError):
-                            pass
+                        except (json.JSONDecodeError, TypeError, AttributeError):
+                            continue
         except Exception:
             pass
 

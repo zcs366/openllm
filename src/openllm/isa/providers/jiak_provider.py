@@ -21,6 +21,10 @@ from typing import Any, Dict, List, Optional
 from ..memory_bus import (
     MemoryProvider, MemoryRecord, WriteRequest, WriteResult, Query, tokenize
 )
+# 时间戳单一判定源（审计 P1-5）：真库 jiak 卡级 created_at 已有 10 张 ISO 串
+# （写自 delivery_bridge），裸 (time.time() - created) 遇 ISO 即 TypeError，
+# 整个 jiak provider 被 bus 吞掉静默降级——与 recall P0 同路径。全部走 coerce_ts。
+from ..timeutil import coerce_ts
 
 logger = logging.getLogger("openllm.providers.jiak")
 
@@ -106,7 +110,7 @@ class JiakProvider:
                     temperature=self._compute_temperature(op),
                     trust_level="internal",
                     tags=card_meta.get("keywords", []),
-                    timestamp=op.get("created_at", card_data.get("created_at", 0)),
+                    timestamp=coerce_ts(op.get("created_at", card_data.get("created_at", 0))),
                     context={
                         "card_id": card_id,
                         "opinion_id": op.get("id", ""),
@@ -177,8 +181,8 @@ class JiakProvider:
             return None
 
     def _compute_temperature(self, opinion: Dict) -> float:
-        """计算意见温度（简化版）"""
-        created = opinion.get("created_at", 0)
+        """计算意见温度（简化版）——created_at 经 coerce_ts 归一，ISO 串不炸。"""
+        created = coerce_ts(opinion.get("created_at", 0))
         if created == 0:
             return 0.5
         age_hours = (time.time() - created) / 3600
