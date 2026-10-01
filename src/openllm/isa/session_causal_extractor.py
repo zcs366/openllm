@@ -26,6 +26,7 @@ import logging
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from .causal_memory import TrustLevel
+from .timeutil import coerce_ts  # 时间戳单一判定源（P1-5/P1-4，2026-10-01）
 from dataclasses import dataclass, asdict
 
 logger = logging.getLogger("openllm.session_causal_extractor")
@@ -281,27 +282,50 @@ JCoT #{i}: {topic}
         return result
     
     def extract_recent(self, hours: int = 24, limit: int = 5) -> List[Dict]:
-        """提取最近N小时内的会话的因果链"""
+        """提取最近N小时内的会话的因果链
+
+        P1-4 修复（2026-10-01，审计确认的活性 bug）：旧写法
+        `WHERE timestamp > ?` 绑定 `str(cutoff)`，而真实 jcot.db 的
+        reasoning_chains.timestamp 全部是 ISO 文本——
+        `"2026-07-30T…" > "1790…"` 字典序恒真，时间过滤完全失效，
+        "最近N小时"拿回的是插入序最旧的会话。
+        改为读回 Python 侧，用 timeutil.coerce_ts（单一判定源）解析，
+        ISO 文本与 epoch 数值/数值字符串都能正确归类；每个 session 取其
+        最新时间戳参与 cutoff 比较，按新→旧排序后取 limit 个。
+        """
         # 从reasoning_chains中找最近的会话
         if not self.jcot_db.exists():
             return []
-        
+
         conn = sqlite3.connect(str(self.jcot_db))
         cur = conn.cursor()
-        
+
         cutoff = time.time() - hours * 3600
-        cur.execute(
-            "SELECT DISTINCT session FROM reasoning_chains WHERE timestamp > ? LIMIT ?",
-            (str(cutoff), limit)
-        )
-        sessions = [row[0] for row in cur.fetchall()]
+        latest_ts: Dict[str, float] = {}
+        try:
+            cur.execute("SELECT session, timestamp FROM reasoning_chains")
+            for session, ts_raw in cur.fetchall():
+                if not session:
+                    continue
+                ts = coerce_ts(ts_raw)
+                if ts > latest_ts.get(session, 0.0):
+                    latest_ts[session] = ts
+        except Exception as e:
+            logger.warning(f"查询reasoning_chains失败: {e}")
         conn.close()
-        
+
+        # 时间不可解析（coerce_ts→0）的会话不满足"最近N小时"，自然被cutoff滤除
+        sessions = [
+            s for s, ts in sorted(latest_ts.items(),
+                                  key=lambda kv: kv[1], reverse=True)
+            if ts >= cutoff
+        ][:limit]
+
         results = []
         for session_id in sessions:
             result = self.extract_from_session(session_id)
             results.append({"session_id": session_id, **result})
-        
+
         return results
 
 
