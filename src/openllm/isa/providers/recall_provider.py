@@ -32,6 +32,12 @@ from typing import Any, Dict, List, Optional
 from ..memory_bus import (
     MemoryProvider, MemoryRecord, WriteRequest, WriteResult, Query, tokenize
 )
+# 时间戳单一判定源（审计 P1-5，2026-10-01）：实现收敛到 openllm.isa.timeutil，
+# 本模块保留旧名兼容别名——"增强不替代"纪律（钉子测试 import 旧名必须继续绿）。
+from ..timeutil import TS_FIELDS as _TS_FIELDS, coerce_ts, pick_ts
+
+_coerce_ts = coerce_ts
+_pick_ts = pick_ts
 
 logger = logging.getLogger("openllm.providers.recall")
 
@@ -56,53 +62,6 @@ def _get_recall_append():
         except ImportError:
             pass
     return _recall_append
-
-
-_TS_FIELDS = ("timestamp", "ts", "_timestamp", "_written_at")
-
-
-def _pick_ts(rec: Dict[str, Any]) -> tuple:
-    """按取值链取时间戳 → (epoch秒, 命中的字段名|None)。
-
-    2026-10-01 军师：取值链必须是**唯一判定源**。原先 _load_records 扩了链、
-    search() 没扩，导致 141 条只有 `ts` 的记录在检索眼里 timestamp=0、时间衰减
-    与温度恒为中性(0.5)。两处共用本函数，再断一处即红（有钉子）。
-    """
-    for field in _TS_FIELDS:
-        if field in rec:
-            return _coerce_ts(rec[field]), field
-    return 0.0, None
-
-
-def _coerce_ts(v: Any) -> float:
-    """健壮解析记录时间戳 → epoch 秒。
-
-    规则：int/float 直接用；纯数字字符串转 float；ISO8601 字符串
-    （支持结尾 'Z' 与 '2026-09-29' 纯日期）用 datetime.fromisoformat
-    解析（naive 按本地时间，与 time.time() 同基准）；无法解析或缺失 → 0
-    （保持"被 cutoff 过滤掉"的既有语义）。
-    """
-    if isinstance(v, bool):
-        return 0.0
-    if isinstance(v, (int, float)):
-        return float(v)
-    if isinstance(v, str):
-        s = v.strip()
-        if not s:
-            return 0.0
-        try:
-            return float(s)
-        except ValueError:
-            pass
-        try:
-            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-        except ValueError:
-            return 0.0
-        if dt.tzinfo is not None:
-            return dt.timestamp()
-        return datetime(dt.year, dt.month, dt.day, dt.hour, dt.minute,
-                        dt.second, dt.microsecond).timestamp()
-    return 0.0
 
 
 class RecallProvider:
