@@ -13,7 +13,7 @@ qwen3.5:9b 不跑 GAIA/Terminal-Bench（远超 9B 能力=公开丢脸），
   M4 因果记忆价值 —— 因果加成的记忆温度显著高于普通记忆（代价被记住）
 
 全部用真实组件 API（temperature_engine / isl_chain），纯计算零 LLM。
-运行：cd /home/zcs/projects/openllm && .venv/bin/python benchmarks/jushen_metrics.py
+运行：cd /mnt/i/openllm && .venv/bin/python benchmarks/jushen_metrics.py
 """
 import sys
 import time

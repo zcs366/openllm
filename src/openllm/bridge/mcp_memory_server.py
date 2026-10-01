@@ -10,7 +10,7 @@ stdio JSON-RPC 传输，外部 Agent（Hermes/Claude Code/Codex）可调用。
   memory_search — 关键词/标签搜索记忆
 
 启动方式：
-  cd /home/zcs/projects/openllm
+  cd /mnt/i/openllm
   PYTHONPATH=src .venv/bin/python -m openllm.bridge.mcp_memory_server
 """
 

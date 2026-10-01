@@ -11,7 +11,7 @@
    temperature = importance × e^(-λt×emotion_factor) + heat + causal_boost
 2. core.idle_wander.IdleWanderer —— 空闲散步（注意力自由偏移）
 
-运行：cd /home/zcs/projects/openllm && .venv/bin/python examples/awakening_frame_demo.py
+运行：cd /mnt/i/openllm && .venv/bin/python examples/awakening_frame_demo.py
 """
 import sys
 import os
