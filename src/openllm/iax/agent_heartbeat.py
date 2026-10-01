@@ -340,6 +340,9 @@ def _execute(agent, hc, turn):
     # 3.3 工具验证
     _handle_tool_validation(agent, decision, result, turn)
 
+    # 3.4 工具失败信号（加固⑤·第一步：只观测，不改行为）
+    _guard_tool_failure_signal(agent, hc, turn)
+
 
 def _guard_blank_tool_output(agent, hc, turn):
     """工具任务「空输出」告警（加固④，2026-10-01）。
@@ -408,6 +411,78 @@ def _guard_blank_tool_output(agent, hc, turn):
     agent._last_output = alarm
     hc.output = alarm
     return alarm
+
+
+def _guard_tool_failure_signal(agent, hc, turn):
+    """工具失败信号：**只观测，不改行为**（加固⑤·第一步，2026-10-01）。
+
+    依据（真库实证，同一形态犯两次）：RECALL.jsonl 第170行（10-01 03:28）与第188行
+    （10-01 21:10）都记 `status="ok"`，内容却是 `/bin/sh: 1: …: not found` + `[exit_code=127]`。
+    根因链：`tools/executor.py` 只在**文本**里附退出码（不抛异常）→ `isn_impl` 见无异常即
+    `success=True` → 唯一解析点 `validate_tool_result` 又只认 `[错误]`/`[拦截]`
+    ⇒ **命令失败被记成成功**，且加固④（判据 result.success）对它不响。
+
+    本步**零行为变更**：不改 `success`、不阻断、不动 `_last_output`／`hc.output`；
+    只做三件事——ERROR 日志、IKO/Turn 留痕、`hc.tool_failure_signal` 置位。
+    第二步（改 success 语义 + 接通 validator）须逐点审下游，等裁。
+    """
+    result = getattr(hc, "result", None)
+    if result is None:
+        return None
+
+    from openllm.core.tool_validator_types import (detect_tool_failure,
+                                                   looks_like_non_command,
+                                                   _SHELL_TOOL_NAMES)
+
+    output = getattr(result, "output", "") or ""
+    decision = getattr(hc, "decision", None)
+    tool_calls = getattr(decision, "tool_calls", None) or []
+    names = [tc.get("name") if isinstance(tc, dict) else str(tc) for tc in tool_calls]
+    sig = None
+
+    # ① 失败标记（退出码/超时/错误/拦截）
+    fail = detect_tool_failure(output)
+    if fail:
+        sig = dict(fail, tools=names, source="marker")
+
+    # ② 输入形态（shell 类工具收到了"不像命令"的东西，如中文展示块）
+    #    与①并存：标记给出"失败了"，形态给出"为什么"——两条信息都要留，不互相覆盖。
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            continue
+        tname = str(tc.get("name") or "")
+        if tname not in _SHELL_TOOL_NAMES:
+            continue
+        args = tc.get("args") or tc.get("params") or {}
+        cmd = args.get("command", "") if isinstance(args, dict) else ""
+        why = looks_like_non_command(cmd)
+        if why:
+            if sig is None:
+                sig = {"kind": "suspicious_command", "detail": why, "tools": names,
+                       "source": "input_shape"}
+            sig["input_shape"] = why
+            sig["command_head"] = (cmd or "")[:60]
+            break
+
+    if not sig:
+        return None
+
+    detail = (f"工具失败信号[{sig['kind']}]：tools={sig.get('tools')} — {sig['detail']}"
+              + (f" | 命令头={sig['command_head']}" if sig.get("command_head") else ""))
+    logger.error("%s | success=%s output_len=%d",
+                 detail, bool(getattr(result, "success", False)), len(output))
+    hc.tool_failure_signal = sig
+    if turn is not None:
+        try:
+            turn.add_action("tool_failure_signal", detail)
+            turn.trace_phase("execute", "failure_signal", detail=detail)
+        except Exception:
+            pass
+    try:
+        agent.iko.trace("execute", "failure_signal", detail=detail)
+    except Exception:
+        pass
+    return sig
 
 
 def _handle_tool_validation(agent, decision, result, turn):

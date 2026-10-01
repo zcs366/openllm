@@ -49,6 +49,9 @@ class HeartbeatContext:
     synth_output: str = ""                             # IAX: 模型消化后的最终回答
     # 加固④(20261001)：工具任务「空输出」告警（送达闸写→监控/终端读，None=未触发）。
     tool_output_alarm: Optional[dict] = None           # IAX: 工具任务无产出告警（如有）
+    # 加固⑤(20261001)：工具失败信号（退出码非0/超时/错误/拦截，及"不像命令的 shell 输入"）。
+    # 第一步只观测（不阻断、不改 success），第二步再定语义。
+    tool_failure_signal: Optional[dict] = None         # IAX: 工具失败/异常输入信号（如有）
     
     # ── 研究层输出 ──
     research: Optional[dict] = None                    # 研究循环: 假说/实验/结论状态
