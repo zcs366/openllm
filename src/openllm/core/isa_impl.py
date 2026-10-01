@@ -125,7 +125,12 @@ class ISA:
         if bus:
             try:
                 from ..isa.memory_bus import Query as BusQuery
-                q = BusQuery(text=msg.text, top_k=10, token_budget=2000)
+                from ..isa.query_builder import build_query
+                # query 提炼层：整条消息原文当检索词会被自身噪声词稀释
+                # （recall_provider 按命中词数/总词数打分），改为搜主题词。
+                # BusQuery 无 raw_text/metadata 保留字段——不改 memory_bus
+                # 协议，原文不落 query 对象。
+                q = BusQuery(text=build_query(msg.text), top_k=10, token_budget=2000)
                 records = bus.query(q)
                 if records:
                     memory["recalled"] = [
