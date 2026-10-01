@@ -1,5 +1,6 @@
 """pytest配置。"""
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -41,6 +42,50 @@ for _name in (".hermes", "projects", ".cache", ".local", ".config", ".io-s"):
             pass
 
 os.environ["HOME"] = str(_FAKE_HOME)
+
+# ★ 2026-10-01 军师亲补：`~/.hermes/jiak/RECALL.jsonl` 单点隔离（181→187 行事故）。
+#   病（实测）：整树软链 `.hermes` ⇒ 任何经"门房"写 RECALL 的用例都追加到**用户真实
+#   记忆库**。subprocess 门房路径 monkeypatch 拦不住，只有文件系统层隔得住。
+#   治法：只把这一个文件 + 两个 sidecar 换成临时副本，其余一律照旧软链——
+#   DPAPI 密钥库 / jiak 库 / projects 可达性**完全不变**（jiak 目录 288M，不宜整拷）。
+_RECALL_ISOLATED_FILES = ("RECALL.jsonl", ".recall_hashes.json", ".recall_trust.json")
+
+
+def _isolate_hermes_recall():
+    link = _FAKE_HOME / ".hermes"
+    if not link.is_symlink():
+        return
+    real = link.resolve()
+    link.unlink()
+    link.mkdir()
+    for child in real.iterdir():
+        if child.name == "jiak":
+            continue
+        try:
+            (link / child.name).symlink_to(child, target_is_directory=child.is_dir())
+        except OSError:
+            pass
+    real_jiak, fake_jiak = real / "jiak", link / "jiak"
+    if not real_jiak.is_dir():
+        return
+    fake_jiak.mkdir()
+    for child in real_jiak.iterdir():
+        if child.name in _RECALL_ISOLATED_FILES:
+            continue
+        try:
+            (fake_jiak / child.name).symlink_to(child, target_is_directory=child.is_dir())
+        except OSError:
+            pass
+    for name in _RECALL_ISOLATED_FILES:
+        src = real_jiak / name
+        if src.exists():
+            try:
+                shutil.copy2(src, fake_jiak / name)  # 带内容副本 ⇒ 读取语义不变
+            except OSError:
+                (fake_jiak / name).write_text("", encoding="utf-8")
+
+
+_isolate_hermes_recall()
 # ★ 打桩成「跟随环境变量」，而不是写死返回 _FAKE_HOME。
 #   原因：测试的惯用手法是 `monkeypatch.setenv("HOME", tmp)` 来隔离——若 Path.home()
 #   被写死，这一手法全部失效（实证：test_engine_utils_warns_on_plaintext_fallback
