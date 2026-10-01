@@ -13,12 +13,14 @@ ForgettingCurve=长时遗忘衰减（小时/天级）。两者衔接：
 
 红线：
   - 不重构ISA核心，只加打分层
-  - 不替代temperature_engine.py（那是MemoryBus级别的记忆温度）
-  - ForgettingCurve作用于topic级，温度引擎作用于entry级
+  - **衰减律唯一实现 = isa/temperature_engine.decay_factor**（2026-10-01 遗忘合一·动作5·
+    成市拍板 A）：本模块不得自带公式，一律调它
+  - **本模块只提议（排序/提示），不判生死**：生死由 temperature_engine.should_evict 判
+  - ForgettingCurve作用于topic级（排序），温度引擎作用于entry级（判定）
   - 保守接入build_context：只在已有记忆召回后加衰减重排
 
-军规十一/十三：增强不替代。已有temperature_engine覆盖entry级衰减，
-本模块补充topic级衰减（build_context用，不影响存储层）。
+军规十一/十三：增强不替代。**判定源只有一个**——温度引擎；本模块是它的使用者，
+输出的是「排序与提示」（build_context 的 forgetting_hints），不是淘汰决定。
 """
 
 import math
@@ -31,6 +33,20 @@ from typing import Dict, List, Optional, Tuple
 DEFAULT_HALF_LIFE_S: float = 86400.0  # 1天 = 86400秒
 MIN_SCORE: float = 0.01               # 最低分数（永不归零，保留微弱记忆）
 IoR_ACCELERATOR: float = 0.7          # IoR已处理主题的衰减加速因子（0.7=加速30%）
+
+# ── 衰减律的唯一判定源（2026-10-01 遗忘合一·动作5）──────────────────
+# 本模块**不再自带衰减公式**：惰性取 isa/temperature_engine.decay_factor，
+# 使「衰减律」全仓只有一处实现（惰性导入是为了避开 isa 包的启动期循环依赖）。
+_DECAY_FN = None
+
+
+def _decay(age_seconds: float, half_life_s: float) -> float:
+    """衰减因子——唯一实现位于 isa/temperature_engine.decay_factor。"""
+    global _DECAY_FN
+    if _DECAY_FN is None:
+        from openllm.isa.temperature_engine import decay_factor
+        _DECAY_FN = decay_factor
+    return _DECAY_FN(age_seconds, half_life_s)
 
 
 class ForgettingCurve:
@@ -89,8 +105,11 @@ class ForgettingCurve:
         if age_seconds is None:
             age_seconds = self._get_age(topic)
 
-        # 核心公式: 2^(-age / half_life) → 半衰期处得0.5
-        raw = 2.0 ** (-age_seconds / self._half_life)
+        # 核心公式: 2^(-age / half_life) → 半衰期处得 0.5
+        # ★ 2026-10-01 遗忘合一（动作5·成市拍板 A）：衰减律**不在本模块**，
+        #   一律调 isa/temperature_engine.decay_factor（唯一实现）。
+        #   本模块只管「排序/提示」——**不判生死**（生死由 temperature_engine.should_evict 判）。
+        raw = _decay(age_seconds, self._half_life)
         score = max(MIN_SCORE, raw)
 
         # IoR加速：已处理主题衰减更快

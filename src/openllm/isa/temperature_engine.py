@@ -192,6 +192,20 @@ def should_evict(temp: float) -> bool:
     return temp < EVICT_THRESHOLD
 
 
+def decay_factor(age_seconds: float, half_life_s: float) -> float:
+    """半衰期衰减因子 `2^(-age/half_life)`——**全仓唯一实现**。
+
+    2026-10-01 遗忘合一（决策记录动作5 · 成市拍板 A）：
+      遗忘只有两个角色，谁都不许越界——
+        · **判定生死** = 本模块（should_evict / EVICT_THRESHOLD / temperature_state）← 唯一判定源；
+        · **排序与提示** = 使用者（如 iai/forgetting.ForgettingCurve）← 只提议，不判死。
+      任何模块都不得再自带一份衰减律；`iai/forgetting` 已改为调用此处。
+    """
+    if half_life_s <= 0:
+        return 0.0
+    return 2.0 ** (-max(0.0, age_seconds) / half_life_s)
+
+
 def eviction_priority(temp: float) -> float:
     """淘汰优先级（越低越先淘汰）。返回 inf 的 entry 永不淘汰。"""
     return temp
