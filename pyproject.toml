@@ -22,3 +22,12 @@ openllm = "openllm.core.main_loop:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+# ★ 2026-10-01 军师亲补：裸跑 `pytest` 此前**全线不可用**（collection 期 INTERNALERROR）。
+#   病因：benchmarks/ablation/smoke_test.py 是脚本（顶层跑 LLM 冒烟，失败即 sys.exit(1)），
+#   但文件名匹配 pytest 默认的 `*_test.py` 收集规则 → 被当测试模块导入 → SystemExit 炸掉
+#   整个 collection（"no tests ran"，exit≠0）。因大家都用"点名跑文件"的惯用法，地雷一直没爆。
+#   治法：默认只收 tests/，并把 benchmarks 排出递归。显式点名路径的行为**不受影响**。
+testpaths = ["tests"]
+norecursedirs = ["benchmarks", "examples", "scripts", ".git", "__pycache__", "*.egg"]
