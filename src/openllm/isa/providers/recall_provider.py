@@ -58,6 +58,22 @@ def _get_recall_append():
     return _recall_append
 
 
+_TS_FIELDS = ("timestamp", "ts", "_timestamp", "_written_at")
+
+
+def _pick_ts(rec: Dict[str, Any]) -> tuple:
+    """按取值链取时间戳 → (epoch秒, 命中的字段名|None)。
+
+    2026-10-01 军师：取值链必须是**唯一判定源**。原先 _load_records 扩了链、
+    search() 没扩，导致 141 条只有 `ts` 的记录在检索眼里 timestamp=0、时间衰减
+    与温度恒为中性(0.5)。两处共用本函数，再断一处即红（有钉子）。
+    """
+    for field in _TS_FIELDS:
+        if field in rec:
+            return _coerce_ts(rec[field]), field
+    return 0.0, None
+
+
 def _coerce_ts(v: Any) -> float:
     """健壮解析记录时间戳 → epoch 秒。
 
@@ -141,8 +157,8 @@ class RecallProvider:
                 continue
 
             score = word_hits / max(len(query_words), 1)
-            # 时间衰减：越新分数越高
-            ts = rec.get("timestamp", rec.get("_written_at", 0))
+            # 时间衰减：越新分数越高（取值链与 _load_records 同源，2026-10-01）
+            ts = _pick_ts(rec)[0]
             if ts > 0:
                 age_days = (time.time() - ts) / 86400
                 import math
@@ -261,19 +277,13 @@ class RecallProvider:
                         if not isinstance(rec, dict):
                             n_bad += 1
                             continue
-                        raw_ts, ts_field = 0, None
-                        for field in ("timestamp", "ts", "_timestamp", "_written_at"):
-                            if field in rec:
-                                raw_ts, ts_field = rec[field], field
-                                break
-                        ts = _coerce_ts(raw_ts)
+                        ts, ts_field = _pick_ts(rec)
                         ts_known = ts_field is not None and ts > 0
                         if ts_known:
                             n_ok += 1
-                            if ts != raw_ts:
-                                # 就地规整成 epoch：下游(search/_compute_temperature)
-                                # 不再碰到原始字符串/异常类型
-                                rec[ts_field] = ts
+                            # 就地规整成 epoch float：下游（search/_compute_temperature）
+                            # 不再碰到原始字符串/异常类型
+                            rec[ts_field] = ts
                         else:
                             n_missing += 1
                             if ts_field is not None:

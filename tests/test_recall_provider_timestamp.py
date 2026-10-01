@@ -210,3 +210,28 @@ def test_warning_is_logged_once_per_instance(tmp_path, caplog):
 
     assert first == 1, f"first load must warn exactly once (got {first})"
     assert later == 1, f"re-reads must not re-warn (got {later})"
+
+
+def test_search_resolves_ts_chain(tmp_path):
+    """Single-source nail (军师 2026-10-01, 包拯/鲁班 audit P1-3): the value chain
+    must be shared by _load_records AND search(). 141/179 real rows carry ONLY
+    `ts`; when the chain lived in the loader alone, search() read timestamp=0
+    -> time decay disabled and temperature pinned at the ts==0 neutral 0.5."""
+    now = time.time()
+    path = tmp_path / "RECALL.jsonl"
+    path.write_text(json.dumps({"content": "chain marker", "type": "build_log",
+                                "ts": str(now - 3600)}) + "\n", encoding="utf-8")
+    provider = RecallProvider(recall_path=path)
+    provider._load_records()
+
+    hits = provider.search(Query(text="chain marker", top_k=5))
+
+    assert len(hits) == 1
+    hit = hits[0]
+    assert hit.timestamp > 0, \
+        "search() must resolve `ts`, not only timestamp/_written_at"
+    assert hit.timestamp >= now - 3 * 3600
+    assert hit.temperature > 0.9, (
+        "a 1h-old row must carry a real temperature; 0.5 is the ts==0 neutral "
+        f"that the old code silently produced (got {hit.temperature})"
+    )
