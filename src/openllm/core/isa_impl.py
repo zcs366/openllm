@@ -299,8 +299,12 @@ class ISA:
             provenance=provenance,
         )
     
-    def respond(self, text: str, phase_times: dict = None):
-        """输出响应 — 走DisplayEngine渲染"""
+    def respond(self, text: str, phase_times: dict = None) -> None:
+        """输出响应 — 走DisplayEngine渲染。
+
+        返回契约（2026-10-01 加固②）：**无返回**——渲染副作用归 DisplayEngine，
+        调用方不得依赖返回值。
+        """
         if self.mode == "console":
             self.display.render_response(text, phase_times)
         else:

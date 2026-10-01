@@ -156,3 +156,149 @@ def resolve_body_method(agent, body: str, method: str, *, logger=None):
         logger.error("六体接线缺口：agent.%s.%s 不存在——本阶段该项能力缺失（非静默告警）",
                      attr, method)
     return fn
+
+
+# ═══════════════════════════════════════════════
+# 加固一批（2026-10-01 夜 · 承重账反事实实验的三条建议）
+# ═══════════════════════════════════════════════
+# 实验实锤：把 IAI 的 predict_consequences 换成返回 list、把 IOS 的 arbitrate 换成返回
+# Proposal，系统**当场崩**——崩点不是功能缺失，而是下游直接取属性：
+#   `.summary_text()` / `.approved`。即：**六体边界不是被强制的，是靠"大家都记得
+#   该返回什么"维系的**（「边界假」的机器证据）。
+# 三道加固（都不改行为，只把「约定」变成「可机判」）：
+#   ① 命名协议：每个体一份 runtime_checkable Protocol（有形可查的接口）
+#   ② 书面契约：入口必须有返回类型注解（没写＝口头约定，启动即拒）
+#   ③ 形状冒烟：声明的返回类型须含**下游真正会读的成员**（零副作用静态检查，
+#      不调用真实入口，因此不会写记忆、不会执行工具）
+from typing import Protocol, runtime_checkable  # noqa: E402
+
+
+@runtime_checkable
+class ISAEntry(Protocol):
+    def build_context(self, msg, session=None, octopus=None, ios=None): ...
+    def respond(self, text, phase_times=None): ...
+
+
+@runtime_checkable
+class IAIEntry(Protocol):
+    def gate(self, *a, **k): ...
+    def emit(self, *a, **k): ...
+
+
+@runtime_checkable
+class IOSEntry(Protocol):
+    def risk_check(self, ctx, prediction): ...
+    def arbitrate(self, proposal, critique, risk): ...
+
+
+@runtime_checkable
+class ISNEntry(Protocol):
+    def execute(self, decision): ...
+
+
+@runtime_checkable
+class IKOEntry(Protocol):
+    def trace(self, phase, status, duration_ms=0.0, detail=""): ...
+    def process_output(self, *a, **k): ...
+
+
+BODY_ENTRY_PROTOCOLS = {
+    "ISA": ISAEntry, "IAI": IAIEntry, "IOS": IOSEntry,
+    "ISN": ISNEntry, "IKO": IKOEntry,
+}
+
+# (实例属性, 方法) → 契约：returns=注解里声明的类型名；attrs=下游真正会读的成员
+ENTRY_CONTRACTS = {
+    ("isa", "build_context"): {"returns": "Context", "attrs": ("user_message", "memory", "identity")},
+    ("isa", "respond"): {"returns": "None", "attrs": ()},
+    ("octopus", "predict_consequences"): {"returns": "Prediction", "attrs": ("summary", "summary_text")},
+    ("octopus", "reason"): {"returns": "tuple", "attrs": ()},
+    ("octopus", "d0_snapshot"): {"returns": "dict", "attrs": ()},
+    ("ios", "risk_check"): {"returns": "RiskAssessment", "attrs": ("level", "blocked")},
+    ("ios", "arbitrate"): {"returns": "Decision", "attrs": ("approved",)},
+    ("ios", "cap_check"): {"returns": "bool", "attrs": ()},
+    ("isn", "execute"): {"returns": "ActionResult", "attrs": ("success", "output")},
+    ("iko", "trace"): {"returns": "None", "attrs": ()},
+    ("iko", "process_output"): {"returns": "str", "attrs": ()},
+}
+
+
+def _resolve_return_name(annotation) -> str:
+    """把返回注解归一成名字（'Context' / 'tuple[Proposal, Critique]' → 'tuple'）。"""
+    if annotation is None:
+        return "None"
+    if isinstance(annotation, type):
+        return annotation.__name__
+    text = str(annotation)
+    text = text.replace("typing.", "")
+    for name in ("None", "Protocol"):
+        if text == name:
+            return name
+    return text.split("[")[0].split(".")[-1]
+
+
+def validate_entry_contracts(agent, strict: bool = True) -> dict:
+    """②③：入口必须有**书面返回契约**，且声明的返回类型含**下游真正会读的成员**。
+
+    零副作用：只读注解与类型对象，**不调用任何真实入口**（不写记忆、不执行工具）。
+    """
+    import dataclasses
+    import inspect
+
+    report: dict = {}
+    bad: list = []
+    for (attr, method), spec in ENTRY_CONTRACTS.items():
+        key = f"agent.{attr}.{method}()"
+        fn = getattr(getattr(agent, attr, None), method, None)
+        if fn is None:
+            report[key] = {"ok": False, "why": "入口缺失"}
+            bad.append(key)
+            continue
+        try:
+            annotation = inspect.signature(fn).return_annotation
+        except (TypeError, ValueError):
+            annotation = inspect.Signature.empty
+        if annotation is inspect.Signature.empty:
+            report[key] = {"ok": False, "why": "无书面返回契约（缺返回注解）"}
+            bad.append(key)
+            continue
+
+        declared = _resolve_return_name(annotation)
+        if spec["returns"] not in (declared, "None", "Protocol") and declared != spec["returns"]:
+            report[key] = {"ok": False, "why": f"返回契约不符：声明 {declared}，期望 {spec['returns']}"}
+            bad.append(key)
+            continue
+
+        # ③ 形状：若声明的类型是仓内 dataclass，检查下游会读的成员是否存在
+        #    注意：**必填字段在类上不是属性**（只在 __init__ 里赋值），
+        #    故必须查 dataclasses.fields()，不能用 hasattr（否则误报，实测踩过）。
+        lack = []
+        if spec["attrs"]:
+            from . import models as _models
+            cls = getattr(_models, declared, None)
+            if cls is not None and dataclasses.is_dataclass(cls):
+                names = {f.name for f in dataclasses.fields(cls)}
+                for a in spec["attrs"]:
+                    if a not in names and not hasattr(cls, a):
+                        lack.append(f"{declared}.{a}")
+        if lack:
+            report[key] = {"ok": False, "why": "返回形状缺下游要读的成员：" + "、".join(lack)}
+            bad.append(key)
+            continue
+
+        report[key] = {"ok": True, "returns": declared, "checked_attrs": list(spec["attrs"])}
+
+    if bad and strict:
+        raise RuntimeError("六体接口契约不成立，拒绝带病启动：" + "；".join(
+            f"{k} → {report[k]['why']}" for k in bad))
+    return report
+
+
+def validate_protocols(agent) -> dict:
+    """① 命名协议：实例是否满足该体的入口协议（runtime_checkable，按成员存在判定）。"""
+    out = {}
+    for body, proto in BODY_ENTRY_PROTOCOLS.items():
+        attr = SIX_BODIES[body][0]
+        obj = getattr(agent, attr, None)
+        out[body] = bool(obj is not None and isinstance(obj, proto))
+    return out

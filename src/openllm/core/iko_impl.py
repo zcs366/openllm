@@ -311,8 +311,12 @@ class IKO:
         
         print(f"  IKO 可观测就绪 · 三能力+七因子 · 日志={self.log_path}")
 
-    def trace(self, phase: str, status: str, duration_ms: float = 0.0, detail: str = ""):
-        """记录一次观测"""
+    def trace(self, phase: str, status: str, duration_ms: float = 0.0, detail: str = "") -> None:
+        """记录一次观测。
+
+        返回契约（2026-10-01 加固②）：**无返回**——痕迹落 metrics 与日志，
+        调用方不得依赖返回值（ikö 是镜子，只留痕不改状态）。
+        """
         m = TickMetrics(
             tick_id=uuid.uuid4().hex[:8],
             phase=phase, status=status,

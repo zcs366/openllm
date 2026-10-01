@@ -70,11 +70,17 @@ class Agent:
         # 六体显式接线（2026-10-01 配平）：登记名册 + **启动即验**——
         # 以前 ISN 靠 getattr 隐式取，改名不报错、断了静默跳过；现在缺件当场抛。
         from .body_protocol import (BodyRegistry, IAIBody, IOSBody, ISNBody,
-                                    IKOBody, validate_bodies)
+                                    IKOBody, validate_bodies, validate_protocols,
+                                    validate_entry_contracts)
         self.bodies = BodyRegistry()
         for _body in (IAIBody(self.iai), IOSBody(self.ios), ISNBody(self.isn), IKOBody(self.iko)):
             self.bodies.register(_body)
         self.body_health = validate_bodies(self)
+        # 加固一批（2026-10-01）：命名协议 + 入口书面返回契约（零副作用静态检查）。
+        # 依据：承重账反事实实验——IAI/IOS 被换成"错形状"的返回时系统当场崩，
+        # 崩点全在"下游直接取属性"，说明边界此前靠口头约定维系。
+        self.body_protocols = validate_protocols(self)
+        self.body_contracts = validate_entry_contracts(self)
 
         # IAI订阅：IKO桥——推理事件trace记录（验证标准4：总线有订阅者）
         try:
