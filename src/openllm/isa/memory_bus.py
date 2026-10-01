@@ -16,6 +16,7 @@ ISA和ICE的唯一记忆接口。替代五套存储的直连模式。
 
 import time
 import math
+import json
 import logging
 from functools import lru_cache
 from pathlib import Path
@@ -72,17 +73,22 @@ def _get_jieba():
     return _jieba
 
 @lru_cache(maxsize=20000)
-def _split_words(text: str) -> tuple:
-    """昂贵的那一半：分词。**只缓存这一半**——纯函数，同输入必得同输出。
+def _split_words(text: str) -> frozenset:
+    """昂贵的那一半：分词 + 过滤，**缓存成品 frozenset**。
 
-    2026-10-01 配平（D-20261001-OTB 动作1）：实测一次「1+1」问询调用 tokenize
-    11,910 次，jieba.cut 累计 11.23s——重复分词把十几秒的问询时间吃掉了大半。
-    这里去掉的是**重复计算**，不改变任何输出（等价性由钉子逐字节证明）。
+    2026-10-01 配平（D-20261001-OTB 动作1）两刀：
+      第一刀缓存分词，jieba 累计 11.23s → 1.71s；但 tokenize 本身仍被调 11,910 次，
+      自身还吃掉 ~2.3s（profiled）——钱花在「每次用 Python 循环重建 set」上。
+      第二刀：缓存**过滤后的 frozenset**，tokenize 只做 `set(frozen)`（C 层拷贝，
+      比 Python 层 set comprehension 快一个量级），调用方拿到的仍是**独立可变 set**。
+    这里去掉的全是**重复计算**，不改变任何输出（等价性由钉子逐字节证明）。
     """
     jb = _get_jieba()
     if jb is not None and jb is not False:
-        return tuple(jb.cut(text.lower()))
-    return tuple(text.lower().split())
+        words = jb.cut(text.lower())
+    else:
+        words = text.lower().split()
+    return frozenset(w for w in words if len(w) > 1 and w.strip())
 
 
 def tokenize(text: str) -> set:
@@ -91,13 +97,41 @@ def tokenize(text: str) -> set:
     返回去重关键词集合（小写，长度>1）。
 
     2026-10-01 配平：
-      · 分词结果缓存（见 _split_words），set 每次现建——调用方拿到的仍是各自独立的
-        可变对象，杜绝共享 set 被下游改写的隐患。
+      · 分词与过滤结果缓存（见 _split_words）；set 每次现建——调用方拿到的仍是各自
+        独立的可变对象，杜绝共享 set 被下游改写的隐患。
       · 刻意**不启用 HMM=False**：那会改变分词输出，属行为变更，不在「等价提速」范围。
     """
     if not text:
         return set()
-    return {w for w in _split_words(text) if len(w) > 1 and w.strip()}
+    return set(_split_words(text))
+
+
+# ── 读盘缓存（2026-10-01 配平 · 动作2 后半：检索层的重复读盘）─────────────────
+# 实测（无 profiler）：一次问询里 memory_bus.query 花 2.14s，其中
+#   provider.delta_capsule 1.29s + provider.jiak 0.84s = 99%；
+#   两者都在**每次 search 时重新读盘**（delta 读最近 N 个 v06_*.json；jiak 读命中卡片）。
+# 缓存键取 (路径, mtime_ns, 大小)：文件一改 mtime 就变 → 自动重读，**不存在陈旧风险**。
+# ⚠️ 使用契约：返回的是**共享对象**，调用方**只读**，不得改写（改了会污染其它调用方）。
+# ⚠️ 容量纪律（2026-10-01 血教训）：maxsize **必须大于工作集**。首版设 512，
+#    而 delta_capsule 每次 search 要读 2,000 个 v06 文件 → 512 条 LRU 在 2000 个键之间
+#    来回踢，**命中率恒为 0**（实测 hits=0/misses=12006，看起来跟没缓存一模一样）。
+#    缓存没命中时，和没有缓存的表现完全一样——所以判据必须看 cache_info()，不能只看墙钟。
+@lru_cache(maxsize=8192)
+def _read_json_keyed(path_str: str, _mtime_ns: int, _size: int) -> Any:
+    return json.loads(Path(path_str).read_text(encoding="utf-8"))
+
+
+def read_json_cached(path) -> Optional[Any]:
+    """按 (路径, mtime, 大小) 缓存的 JSON 读盘。文件不存在/解析失败 → None（与旧的容错行为一致）。"""
+    p = Path(path)
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    try:
+        return _read_json_keyed(str(p), st.st_mtime_ns, st.st_size)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return None
 
 
 # ═══════════════════════════════════════════════

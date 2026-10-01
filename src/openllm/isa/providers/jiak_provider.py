@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..memory_bus import (
-    MemoryProvider, MemoryRecord, WriteRequest, WriteResult, Query, tokenize
+    MemoryProvider, MemoryRecord, WriteRequest, WriteResult, Query, tokenize,
+    read_json_cached,
 )
 # 时间戳单一判定源（审计 P1-5）：真库 jiak 卡级 created_at 已有 10 张 ISO 串
 # （写自 delivery_bridge），裸 (time.time() - created) 遇 ISO 即 TypeError，
@@ -83,12 +84,8 @@ class JiakProvider:
         records = []
         for card_id, score, card_meta in matched_cards[:query.top_k * 2]:
             card_path = self._dir / "cards" / f"{card_id}.json"
-            if not card_path.exists():
-                continue
-
-            try:
-                card_data = json.loads(card_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
+            card_data = read_json_cached(card_path)   # (路径,mtime,size) 缓存；调用方只读
+            if card_data is None:
                 continue
 
             # 提取alive opinions作为条级注入
@@ -163,22 +160,19 @@ class JiakProvider:
         }
 
     def _load_index(self) -> Optional[Dict]:
-        """加载index.json（带缓存，5秒过期）"""
-        now = time.time()
-        if self._index is not None and now - self._index_loaded_at < 5:
-            return self._index
+        """加载index.json（按 (路径,mtime,size) 缓存）。
 
+        2026-10-01 配平：原先手写「5 秒 TTL」——既会漏掉 5 秒内他进程的写入（陈旧），
+        又要靠时间猜。改 mtime 键控：文件一动立刻重读，无陈旧窗口，也无手写计时。
+        """
         index_path = self._dir / "index.json"
-        if not index_path.exists():
+        index = read_json_cached(index_path)
+        if index is None:
+            if not index_path.exists():
+                return None
+            logger.error("Failed to load jiak index: %s（读盘或解析失败）", index_path)
             return None
-
-        try:
-            self._index = json.loads(index_path.read_text(encoding="utf-8"))
-            self._index_loaded_at = now
-            return self._index
-        except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"Failed to load jiak index: {e}")
-            return None
+        return index
 
     def _compute_temperature(self, opinion: Dict) -> float:
         """计算意见温度（简化版）——created_at 经 coerce_ts 归一，ISO 串不炸。"""

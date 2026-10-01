@@ -22,7 +22,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..memory_bus import (
-    MemoryProvider, MemoryRecord, WriteRequest, WriteResult, Query, tokenize
+    MemoryProvider, MemoryRecord, WriteRequest, WriteResult, Query, tokenize,
+    read_json_cached,
 )
 
 logger = logging.getLogger("openllm.providers.delta_capsule")
@@ -117,9 +118,8 @@ class DeltaCapsuleProvider:
         )[:_SCAN_RECENT_N]
 
         for path in v06_files:
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
+            data = read_json_cached(path)   # (路径,mtime,size) 缓存；调用方只读
+            if data is None:
                 continue
 
             session_id = data.get("session_id", path.stem)
