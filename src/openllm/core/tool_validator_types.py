@@ -68,6 +68,19 @@ def validate_tool_result(call: ToolCall) -> ValidationReport:
             audit_entry=AuditEntry(reason=f"工具返回错误: {call.result[:100]}")
         )
     
+    # 失败标记（退出码非0/超时；加固⑤·第二步 2a，2026-10-02）：**只 WARN，不阻断**。
+    # 判据用第一步的唯一判定源 detect_tool_failure，本函数不另立口径。
+    # [错误]/[拦截] 已在上方分支返回（FAIL+block，行为保持一字未动）；
+    # 能拦失败标记=行为变更，属下一轮（2b），本次红线禁止。
+    _fail = detect_tool_failure(call.result)
+    if _fail is not None:
+        checks.append(("failure_marker", "warn"))
+        return ValidationReport(
+            overall=ValidationResult.WARN,
+            checks=checks,
+            should_block=False
+        )
+    
     checks.append(("result_ok", "pass"))
     return ValidationReport(
         overall=ValidationResult.PASS,

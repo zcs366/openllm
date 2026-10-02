@@ -568,6 +568,11 @@ def _guard_tool_failure_signal(agent, hc, turn):
     logger.error("%s | success=%s output_len=%d",
                  detail, bool(getattr(result, "success", False)), len(output))
     hc.tool_failure_signal = sig
+    # 2a·B③（2026-10-02）：接入可计数账（append-only，record 绝不抛异常，仪表零行为变更）。
+    from openllm.core.tool_failure_ledger import record as _ledger_record
+    _ledger_record(sig,
+                   session_id=str(getattr(getattr(agent, "session", None), "id", "") or ""),
+                   turn_id=str(getattr(turn, "id", "") or ""))
     if turn is not None:
         try:
             turn.add_action("tool_failure_signal", detail)
@@ -582,10 +587,10 @@ def _guard_tool_failure_signal(agent, hc, turn):
 
 
 def _handle_tool_validation(agent, decision, result, turn):
-    """工具结果验证"""
+    """工具结果验证（2a·B①，2026-10-02：拆掉 `if not result.success: return` 早退——
+    失败结果同样进验证，validator 才看得见失败标记；success=False 时下游无硬依赖，
+    全程在 try 内，即便崩也只 trace skip，不伤心跳）。"""
     from openllm.core.tool_validator_types import ToolCall, validate_tool_result
-    if not result.success:
-        return
 
     try:
         _tc_list = getattr(decision, 'tool_calls', None) or []
