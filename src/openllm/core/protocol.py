@@ -52,6 +52,9 @@ class HeartbeatContext:
     # 加固⑤(20261001)：工具失败信号（退出码非0/超时/错误/拦截，及"不像命令的 shell 输入"）。
     # 第一步只观测（不阻断、不改 success），第二步再定语义。
     tool_failure_signal: Optional[dict] = None         # IAX: 工具失败/异常输入信号（如有）
+    # 加固⑤·第二步 2-pre(20261002)：执行前输入侧拦截（shell 类工具收到"显然不像命令"
+    # 的文本→不执行本 turn，直接退回）。协议字段显式声明——不许隐式 setattr。
+    tool_input_reject: Optional[dict] = None           # IAX: 工具输入拦截记录（如有）
     
     # ── 研究层输出 ──
     research: Optional[dict] = None                    # 研究循环: 假说/实验/结论状态

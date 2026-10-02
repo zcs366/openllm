@@ -191,6 +191,11 @@ def test_end_to_end_observes_without_changing_answer():
     注：交付物可能与裸工具输出不同——`_synthesize` 合法地会把工具输出交给模型再消化
     （实测批量跑时就是这样，答案甚至正确说出了"命令执行失败"）。故**不断言输出内容**，
     只断言"观测闸没往交付物里塞东西" + 信号留痕——这才是"零行为变更"的可判形式。
+
+    2-pre(20261002)改注：原样用 REAL_170_COMMAND 走全链路会被**执行前**输入闸拦下
+    （这正是病根的治理），根本到不了观测闸。本钉子的职责是验"观测不改交付"，故命令
+    换成合法 `ls -la`，让**标记路径**（source=marker）仍走完整执行链路；
+    输入侧拦截的端到端另见 tests/test_tool_input_gate.py。
     """
     from openllm.core.main_loop import Agent
 
@@ -198,7 +203,7 @@ def test_end_to_end_observes_without_changing_answer():
     a.ios.cap_check = lambda *ar, **kw: True
     a.ios.arbitrate = lambda proposal, critique, risk=None: Decision(
         approved=True, action="shell", reason="",
-        tool_calls=[{"name": "shell", "args": {"command": REAL_170_COMMAND}}],
+        tool_calls=[{"name": "shell", "args": {"command": "ls -la"}}],
     )
     a.isn.execute = lambda *ar, **kw: ActionResult(success=True, output=REAL_170_SUMMARY)
     try:

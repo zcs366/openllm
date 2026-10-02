@@ -322,6 +322,15 @@ def _execute(agent, hc, turn):
             turn.complete()
             return
 
+    # 3.15 输入侧闸（加固⑤·第二步 2-pre，2026-10-02）：
+    # shell 类工具的 command 若"显然不像命令"（展示块/中文标签/emoji），执行前拦截。
+    # 处置形态镜像 3.1 cap 拒绝分支——区别只在**必须放一个失败 ActionResult 进协议**：
+    # 实测 cap 分支 hc.result=None 会让 _learn 的 octopus.compare 崩（AttributeError），
+    # 本闸不重蹈此坑；同时 hc.rejection_record 置位使加固④送达闸不重复告警。
+    rejected = _reject_non_command_tool_inputs(agent, hc, turn)
+    if rejected is not None:
+        return
+
     # 3.2 执行
     t6 = time.time()
     result = agent.isn.execute(decision)
@@ -342,6 +351,93 @@ def _execute(agent, hc, turn):
 
     # 3.4 工具失败信号（加固⑤·第一步：只观测，不改行为）
     _guard_tool_failure_signal(agent, hc, turn)
+
+
+# ── 3.15 输入侧闸（加固⑤·第二步 2-pre）──────────────────────
+
+def _extract_shell_command(tc) -> Optional[str]:
+    """从 tool_call 取 shell 类命令文本；非 shell 类/取不到 → None。
+
+    与 `_guard_tool_failure_signal` 的②同一口径：args 或 params 里的 command 键。
+    """
+    from openllm.core.tool_validator_types import _SHELL_TOOL_NAMES
+    if not isinstance(tc, dict):
+        return None
+    if str(tc.get("name") or "") not in _SHELL_TOOL_NAMES:
+        return None
+    args = tc.get("args") or tc.get("params") or {}
+    if isinstance(args, dict):
+        cmd = args.get("command", "")
+        if isinstance(cmd, str):
+            return cmd
+    return None
+
+
+def _reject_non_command_tool_inputs(agent, hc, turn):
+    """执行前拦截：shell 类工具拿到了"显然不像命令"的文本 → 不执行本 turn。
+
+    病（真库实证）：展示块/中文标签被喂进 shell，产生
+    `/bin/sh: N: …: not found` + `[exit_code=127]`，却被记成成功（10-01
+    RECALL.jsonl 第170/188行）。判据一律用第一步的 `looks_like_non_command`
+    （一字未改、未放宽），只拦高置信形态；正常命令（ls -la、grep 中文 file）放行。
+
+    处置（形态镜像 3.1 cap 拒绝分支，逐条）：
+      · 显式退回文案写 `_last_output` 与 `hc.output`（模型/用户都看得见，不许静默）
+      · hc.result = ActionResult(success=False)——**不是 None**：实测 None 会让
+        _learn 的 octopus.compare 崩；success 语义本身未改，只是本 turn 没执行
+      · hc.rejection_record 置位 → 加固④送达闸不重复告警
+      · `hc.tool_input_reject`（core/protocol.py 显式声明字段）
+      · trace（turn + IKO）+ ERROR 日志 + 失败账 record(source="input_reject")
+      · turn.complete(); return（信号 dict 返回；未拦截返回 None）
+    """
+    from openllm.core.tool_validator_types import looks_like_non_command
+    from openllm.core.tool_failure_ledger import record
+
+    decision = getattr(hc, "decision", None)
+    tool_calls = getattr(decision, "tool_calls", None) or []
+    hit = None  # (name, command, reason)
+    for tc in tool_calls:
+        cmd = _extract_shell_command(tc)
+        if cmd is None:
+            continue
+        why = looks_like_non_command(cmd)
+        if why:
+            hit = (str(tc.get("name") or ""), cmd, why)
+            break
+    if hit is None:
+        return None
+
+    tname, cmd, why = hit
+    reject_msg = (f"[工具输入拦截] 该命令不像 shell 命令（{why}），"
+                  f"已拦截未执行，请改写为真正的命令")
+    agent._last_output = reject_msg
+    hc.output = reject_msg
+    # output 里带退回文案：_learn 对工具任务会 `agent._last_output = result.output`
+    # （line 818），文案不带进去会在交付环节被洗成空白——拦截了却没人看见。
+    hc.result = ActionResult(success=False, output=reject_msg, error=reject_msg)
+    hc.tool_input_reject = {
+        "tool": tname, "reason": why, "command_head": (cmd or "")[:60],
+        "action": "rejected_before_execute",
+    }
+    hc.rejection_record = {"reason": f"工具输入拦截: {why}", "phase": "execute"}
+    logger.error("%s | tool=%s command_head=%s", reject_msg, tname, (cmd or "")[:60])
+    if turn is not None:
+        try:
+            turn.add_action("tool_input_reject", reject_msg)
+            turn.trace_phase("execute", "input_rejected", detail=why)
+        except Exception:
+            pass
+    try:
+        agent.iko.trace("execute", "input_rejected", detail=why)
+    except Exception:
+        pass
+    record({"tool": tname, "kind": "input_rejected", "source": "input_reject",
+            "input_shape": why},
+           session_id=str(getattr(getattr(agent, "session", None), "id", "") or ""),
+           turn_id=str(getattr(turn, "id", "") or ""))
+    if turn is not None:
+        turn.complete()
+    return hc.tool_input_reject
 
 
 def _guard_blank_tool_output(agent, hc, turn):
